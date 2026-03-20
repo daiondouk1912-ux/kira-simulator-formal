@@ -115,6 +115,9 @@ const state = {
   sessionId: '',
   startedNotified: false,
   resultNotified: false,
+  debugLog: [],
+  appVersion: 'v7-debug-notify',
+  lastRenderedStep: null,
   selected: [],
   inputs: {
     concrete: { quantity: '' },
@@ -136,6 +139,17 @@ const state = {
 };
 
 const app = document.getElementById('app');
+
+
+function logDebug(message) {
+  const stamp = new Date().toLocaleTimeString('ja-JP', { hour12: false });
+  state.debugLog.unshift(`${stamp} ${message}`);
+  state.debugLog = state.debugLog.slice(0, 8);
+}
+
+function fnUrl(name) {
+  return `${window.location.origin}/.netlify/functions/${name}`;
+}
 
 function yen(value) {
   return new Intl.NumberFormat('ja-JP', { style: 'currency', currency: 'JPY', maximumFractionDigits: 0 }).format(value);
@@ -263,23 +277,32 @@ async function notifyStart() {
   state.startedAt = new Date().toISOString();
   state.sessionId = state.sessionId || `sim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
-    await fetch('/.netlify/functions/notify-start', {
+    logDebug('開始通知送信開始');
+    const response = await fetch(fnUrl('notify-start'), {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ startedAt: state.startedAt, sessionId: state.sessionId, userAgent: navigator.userAgent }),
+      body: JSON.stringify({ startedAt: state.startedAt, sessionId: state.sessionId, userAgent: navigator.userAgent, appVersion: state.appVersion }),
     });
+    const data = await response.json().catch(() => ({}));
+    logDebug(`開始通知レスポンス: ${response.status} ${JSON.stringify(data)}`);
   } catch (error) {
     console.warn('start notify failed', error);
+    logDebug(`開始通知失敗: ${error?.message || error}`);
   }
 }
 
+
 async function notifyResult(payload) {
   try {
-    await fetch('/.netlify/functions/notify-result', {
+    logDebug('結果通知送信開始');
+    const response = await fetch(fnUrl('notify-result'), {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, appVersion: state.appVersion }),
     });
+    const data = await response.json().catch(() => ({}));
+    logDebug(`結果通知レスポンス: ${response.status} ${JSON.stringify(data)}`);
   } catch (error) {
     console.warn('result notify failed', error);
+    logDebug(`結果通知失敗: ${error?.message || error}`);
   }
 }
 
@@ -552,6 +575,29 @@ function render() {
   app.innerHTML = '';
   const steps = [renderStep0, renderStep1, renderStep2, renderStep3, renderStep4];
   app.appendChild(steps[state.step]());
+
+  const debug = document.createElement('div');
+  debug.className = 'card';
+  debug.style.marginTop = '12px';
+  debug.innerHTML = `
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
+      <strong>デバッグ情報</strong>
+      <span style="font-size:12px;color:#5d6b63">${state.appVersion} / step ${state.step + 1}</span>
+    </div>
+    <div style="margin-top:8px;font-size:12px;color:#5d6b63;line-height:1.7">
+      開始通知: ${state.startedNotified ? '送信済み' : '未送信'} / 結果通知: ${state.resultNotified ? '送信済み' : '未送信'}
+    </div>
+    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+      <button type="button" id="debug-start" class="secondary">開始通知を手動送信</button>
+      <button type="button" id="debug-result" class="secondary">結果通知を手動送信</button>
+    </div>
+    <pre style="margin-top:10px;background:#f5f7f4;border-radius:12px;padding:10px;font-size:12px;white-space:pre-wrap">${state.debugLog.join('\n') || 'まだログなし'}</pre>
+  `;
+  app.appendChild(debug);
+  debug.querySelector('#debug-start').addEventListener('click', async () => { await notifyStart(); render(); });
+  debug.querySelector('#debug-result').addEventListener('click', async () => { await notifyResult(buildResultPayload()); render(); });
+
+  if (state.lastRenderedStep !== state.step) { logDebug(`render step ${state.step + 1}`); state.lastRenderedStep = state.step; }
 
   if (state.step >= 1 && !state.startedNotified) {
     notifyStart();
