@@ -112,6 +112,7 @@ const WORK_OPTIONS = [
 const state = {
   step: 0,
   startedAt: null,
+  sessionId: '',
   startedNotified: false,
   selected: [],
   inputs: {
@@ -259,10 +260,11 @@ async function notifyStart() {
   if (state.startedNotified) return;
   state.startedNotified = true;
   state.startedAt = new Date().toISOString();
+  state.sessionId = state.sessionId || `sim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
     await fetch('/.netlify/functions/notify-start', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ startedAt: state.startedAt, userAgent: navigator.userAgent }),
+      body: JSON.stringify({ startedAt: state.startedAt, sessionId: state.sessionId, userAgent: navigator.userAgent }),
     });
   } catch (error) {
     console.warn('start notify failed', error);
@@ -321,8 +323,9 @@ function renderStep1() {
   step.querySelectorAll('input[type="checkbox"]').forEach((input) => {
     input.addEventListener('change', (e) => {
       const { value, checked } = e.target;
-      if (checked) state.selected.push(value);
+      if (checked) state.selected = Array.from(new Set([...state.selected, value]));
       else state.selected = state.selected.filter((x) => x !== value);
+      render();
     });
   });
   setActions(step, [
@@ -478,6 +481,7 @@ function renderStep3() {
         await notifyResult({
           startedAt: state.startedAt,
           displayedAt: new Date().toISOString(),
+          sessionId: state.sessionId,
           selected: state.selected,
           inputs: state.inputs,
           results,
