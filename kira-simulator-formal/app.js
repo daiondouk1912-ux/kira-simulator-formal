@@ -557,7 +557,7 @@ function renderStep4() {
     ${consultHtml}
   `);
   setActions(step, [
-    { label: 'この内容で相談する', className: 'primary', onClick: () => alert('相談導線の接続先を設定してください。') },
+    { label: 'この内容で相談する', className: 'primary', onClick: () => { window.location.href = 'https://line.me/R/oaMessage/%40963rsnpu'; } },
     { label: '一覧にない工事も相談する', className: 'ghost', onClick: () => { state.selected = Array.from(new Set([...state.selected, 'custom_consult'])); state.step = 2; render(); } },
     { label: 'もう一度はじめから入力する', className: 'secondary', onClick: () => { window.location.reload(); } },
   ]);
