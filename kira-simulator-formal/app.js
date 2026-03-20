@@ -114,6 +114,7 @@ const state = {
   startedAt: null,
   sessionId: '',
   startedNotified: false,
+  resultNotified: false,
   selected: [],
   inputs: {
     concrete: { quantity: '' },
@@ -282,6 +283,18 @@ async function notifyResult(payload) {
   }
 }
 
+
+function buildResultPayload() {
+  const results = computeResults();
+  return {
+    displayedAt: new Date().toISOString(),
+    sessionId: state.sessionId || `sim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    selected: state.selected,
+    inputs: state.inputs,
+    results,
+  };
+}
+
 function renderStep0() {
   const step = createStep(0, 'はじめる前に');
   setBody(step, `
@@ -296,7 +309,7 @@ function renderStep0() {
     </div>
   `);
   setActions(step, [
-    { label: '概算をはじめる', className: 'primary', onClick: async () => { await notifyStart(); state.step = 1; render(); } },
+    { label: '概算をはじめる', className: 'primary', onClick: async () => { state.step = 1; render(); } },
   ]);
   return step;
 }
@@ -539,6 +552,14 @@ function render() {
   app.innerHTML = '';
   const steps = [renderStep0, renderStep1, renderStep2, renderStep3, renderStep4];
   app.appendChild(steps[state.step]());
+
+  if (state.step >= 1 && !state.startedNotified) {
+    notifyStart();
+  }
+  if (state.step === 4 && !state.resultNotified) {
+    state.resultNotified = true;
+    notifyResult(buildResultPayload());
+  }
 }
 
 render();
