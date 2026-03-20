@@ -55,7 +55,8 @@ const PRICE_MASTER = {
   carport1: { label: 'カーポート1台用', fixed: { low: 250000, high: 300000 } },
   carport2: { label: 'カーポート2台用', fixed: { low: 400000, high: 550000 } },
   concrete_break: {
-    label: 'コンクリート解体', unit: '㎡',
+    label: 'コンクリート解体',
+    unit: '㎡',
     brackets: [
       { max: 10, low: 4000, high: 5500 },
       { max: 30, low: 3800, high: 5000 },
@@ -64,7 +65,8 @@ const PRICE_MASTER = {
     minimum: { low: 60000, high: 100000 },
   },
   block_break_top: {
-    label: 'ブロック解体（上だけ）', unit: 'm',
+    label: 'ブロック解体（上だけ）',
+    unit: 'm',
     brackets: [
       { max: 10, low: 6000, high: 8000 },
       { max: 20, low: 5500, high: 7000 },
@@ -73,7 +75,8 @@ const PRICE_MASTER = {
     minimum: { low: 60000, high: 100000 },
   },
   block_break_base: {
-    label: 'ブロック解体（ベースごと）', unit: 'm',
+    label: 'ブロック解体（ベースごと）',
+    unit: 'm',
     brackets: [
       { max: 10, low: 9000, high: 12000 },
       { max: 20, low: 8000, high: 10500 },
@@ -82,7 +85,8 @@ const PRICE_MASTER = {
     minimum: { low: 100000, high: 150000 },
   },
   fence_remove: {
-    label: 'フェンス撤去', unit: 'm',
+    label: 'フェンス撤去',
+    unit: 'm',
     brackets: [
       { max: 10, low: 2500, high: 4000 },
       { max: 20, low: 2000, high: 3500 },
@@ -95,9 +99,9 @@ const PRICE_MASTER = {
 const WORK_OPTIONS = [
   { id: 'concrete', label: '土間コンクリート', note: '駐車場・アプローチなどのコンクリート舗装' },
   { id: 'gravel', label: '砕石敷き', note: '砕石のみの敷き込み' },
-  { id: 'weed_gravel', label: '防草シート＋砕石敷き', note: '雑草対策込みで砕石施工' },
+  { id: 'weed_gravel', label: '防草シート＋砕石敷き', note: '防草シート込みの砕石施工' },
   { id: 'turf', label: '人工芝', note: '人工芝の敷設' },
-  { id: 'fence_mesh', label: 'メッシュフェンス', note: '種類・設置方法・長さを入力して概算' },
+  { id: 'fence_mesh', label: 'メッシュフェンス', note: '設置方法と長さから概算' },
   { id: 'privacy_fence', label: '目隠しフェンス', note: '板塀・ルーバー系の目隠しフェンス' },
   { id: 'block_add', label: 'ブロック1段追加', note: '既存ブロック上への1段追加' },
   { id: 'block_new', label: 'ブロック新設（ベースから）', note: 'ベースから新設するブロック工事' },
@@ -106,7 +110,7 @@ const WORK_OPTIONS = [
   { id: 'block_break_top', label: 'ブロック解体（上だけ）', note: '上積み部分のみ解体' },
   { id: 'block_break_base', label: 'ブロック解体（ベースごと）', note: '基礎ごと撤去する解体' },
   { id: 'fence_remove', label: 'フェンス撤去', note: '既存フェンスの撤去' },
-  { id: 'custom_consult', label: '一覧にない工事も相談', note: '計算せず相談内容として送信' },
+  { id: 'custom_consult', label: '一覧にない工事も相談', note: '概算にない内容も最後に相談可能' },
 ];
 
 const state = {
@@ -115,9 +119,8 @@ const state = {
   sessionId: '',
   startedNotified: false,
   resultNotified: false,
-  debugLog: [],
-  appVersion: 'v7-debug-notify',
-  lastRenderedStep: null,
+  startNotifyPending: false,
+  resultNotifyPending: false,
   selected: [],
   inputs: {
     concrete: { quantity: '' },
@@ -139,13 +142,7 @@ const state = {
 };
 
 const app = document.getElementById('app');
-
-
-function logDebug(message) {
-  const stamp = new Date().toLocaleTimeString('ja-JP', { hour12: false });
-  state.debugLog.unshift(`${stamp} ${message}`);
-  state.debugLog = state.debugLog.slice(0, 8);
-}
+const STEP_LABELS = ['スタート', '工事を選ぶ', '内容を入力', '内容を確認', '概算を見る'];
 
 function fnUrl(name) {
   return `${window.location.origin}/.netlify/functions/${name}`;
@@ -271,47 +268,57 @@ function setActions(stepEl, buttons) {
   });
 }
 
+function progressPills(activeIndex) {
+  return `<div class="progress-pills">${STEP_LABELS.map((label, index) => {
+    const cls = index === activeIndex ? 'active' : index < activeIndex ? 'done' : '';
+    return `<span class="pill ${cls}">${index + 1}. ${label}</span>`;
+  }).join('')}</div>`;
+}
+
 async function notifyStart() {
-  if (state.startedNotified) return;
-  state.startedNotified = true;
-  state.startedAt = new Date().toISOString();
+  if (state.startedNotified || state.startNotifyPending) return;
+  state.startNotifyPending = true;
+  state.startedAt = state.startedAt || new Date().toISOString();
   state.sessionId = state.sessionId || `sim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
-    logDebug('開始通知送信開始');
     const response = await fetch(fnUrl('notify-start'), {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ startedAt: state.startedAt, sessionId: state.sessionId, userAgent: navigator.userAgent, appVersion: state.appVersion }),
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ startedAt: state.startedAt, sessionId: state.sessionId, userAgent: navigator.userAgent, appVersion: 'v8-public-release' }),
     });
     const data = await response.json().catch(() => ({}));
-    logDebug(`開始通知レスポンス: ${response.status} ${JSON.stringify(data)}`);
+    if (response.ok && data.ok) state.startedNotified = true;
   } catch (error) {
     console.warn('start notify failed', error);
-    logDebug(`開始通知失敗: ${error?.message || error}`);
+  } finally {
+    state.startNotifyPending = false;
   }
 }
-
 
 async function notifyResult(payload) {
+  if (state.resultNotified || state.resultNotifyPending) return;
+  state.resultNotifyPending = true;
   try {
-    logDebug('結果通知送信開始');
     const response = await fetch(fnUrl('notify-result'), {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...payload, appVersion: state.appVersion }),
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...payload, appVersion: 'v8-public-release' }),
     });
     const data = await response.json().catch(() => ({}));
-    logDebug(`結果通知レスポンス: ${response.status} ${JSON.stringify(data)}`);
+    if (response.ok && data.ok) state.resultNotified = true;
   } catch (error) {
     console.warn('result notify failed', error);
-    logDebug(`結果通知失敗: ${error?.message || error}`);
+  } finally {
+    state.resultNotifyPending = false;
   }
 }
-
 
 function buildResultPayload() {
   const results = computeResults();
   return {
     displayedAt: new Date().toISOString(),
     sessionId: state.sessionId || `sim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    startedAt: state.startedAt,
     selected: state.selected,
     inputs: state.inputs,
     results,
@@ -319,20 +326,20 @@ function buildResultPayload() {
 }
 
 function renderStep0() {
-  const step = createStep(0, 'はじめる前に');
+  const step = createStep(0, 'スタート');
   setBody(step, `
-    <div class="progress-pills"><span class="pill active">1. はじめる前に</span><span class="pill">2. 工事を選ぶ</span><span class="pill">3. 条件を入力</span><span class="pill">4. 確認</span><span class="pill">5. 結果</span></div>
+    ${progressPills(0)}
     <div class="grid">
       <div class="notice">
-        <p>こちらは概算の目安です。現地状況、搬入条件、下地状況、既存物の有無などにより金額は変動します。正式なお見積もりは現地確認後のご案内となります。</p>
+        <p>駐車場のコンクリート、フェンス、人工芝、カーポートなど、気になる工事の概算目安をご確認いただけます。まずは工事を選んで進んでください。</p>
       </div>
       <div class="subnotice">
-        <p>結果画面では、<strong>合計レンジよりも工事項目別の目安を主役</strong>として表示します。小面積・短距離は最低施工価格を優先して計算します。</p>
+        <p>※ 表示金額は概算の目安です。現地状況や施工条件により変動します。正式なお見積もりは現地確認後にご案内いたします。</p>
       </div>
     </div>
   `);
   setActions(step, [
-    { label: '概算をはじめる', className: 'primary', onClick: async () => { state.step = 1; render(); } },
+    { label: 'シミュレーターをはじめる', className: 'primary', onClick: () => { state.step = 1; render(); } },
   ]);
   return step;
 }
@@ -340,8 +347,8 @@ function renderStep0() {
 function renderStep1() {
   const step = createStep(1, '工事を選ぶ');
   setBody(step, `
-    <div class="progress-pills"><span class="pill done">1. はじめる前に</span><span class="pill active">2. 工事を選ぶ</span><span class="pill">3. 条件を入力</span><span class="pill">4. 確認</span><span class="pill">5. 結果</span></div>
-    <p class="muted">複数選択できます。一覧にない工事や判断しにくい内容は、最後に相談項目として分けて扱います。</p>
+    ${progressPills(1)}
+    <p class="muted">複数選択できます。一覧にない工事や迷う内容は、最後に相談内容としてまとめてお送りいただけます。</p>
     <div class="selection-grid">
       ${WORK_OPTIONS.map((item) => `
         <div class="selection-card">
@@ -384,13 +391,13 @@ function fieldBlock(title, description, content) {
 }
 
 function renderStep2() {
-  const step = createStep(2, '条件を入力');
+  const step = createStep(2, '内容を入力');
   const blocks = [];
 
   state.selected.forEach((key) => {
     if (['concrete','gravel','weed_gravel','turf','privacy_fence','block_add','block_new','concrete_break','block_break_top','block_break_base','fence_remove'].includes(key)) {
       const meta = PRICE_MASTER[key];
-      blocks.push(fieldBlock(meta.label, `ご入力いただく${meta.unit}数を概算の目安として使用します。`, `
+      blocks.push(fieldBlock(meta.label, `${meta.unit}数をご入力ください。数量をもとに概算目安を算出します。`, `
         <div class="field-row">
           <div class="field">
             <label>${meta.unit}数</label>
@@ -400,7 +407,7 @@ function renderStep2() {
       `));
     }
     if (key === 'fence_mesh') {
-      blocks.push(fieldBlock('メッシュフェンス', '試作版の入力構成を残しつつ、内部ロジックで単価帯を分岐します。', `
+      blocks.push(fieldBlock('メッシュフェンス', '設置方法と長さをもとに概算目安を表示します。', `
         <div class="field-row">
           <div class="field">
             <label>種類</label>
@@ -421,11 +428,10 @@ function renderStep2() {
             <input type="number" min="0" step="0.1" data-key="fence_mesh" data-name="length" value="${state.inputs.fence_mesh.length}" placeholder="例）20" />
           </div>
         </div>
-        <p class="small">※ 表示は共通のまま、内部で「通常新設」「既存ブロック上」「ブロック1段追加」に自動分岐します。</p>
       `));
     }
     if (key === 'carport') {
-      blocks.push(fieldBlock('カーポート', '台数で概算を切り替えます。3台用は相談項目として扱います。', `
+      blocks.push(fieldBlock('カーポート', '台数に合わせて概算目安を切り替えます。', `
         <div class="field-row">
           <div class="field">
             <label>台数</label>
@@ -439,7 +445,7 @@ function renderStep2() {
       `));
     }
     if (key === 'custom_consult') {
-      blocks.push(fieldBlock('一覧にない工事も相談', 'ここに書かれた内容は金額計算せず、相談内容として結果と通知に含めます。', `
+      blocks.push(fieldBlock('一覧にない工事も相談', '気になる内容や工事名があればご入力ください。', `
         <div class="field">
           <label>相談したい内容</label>
           <textarea data-key="custom_consult" data-name="note" placeholder="例）門柱のやり替え、階段補修、土留めの相談など">${state.inputs.custom_consult.note || ''}</textarea>
@@ -448,7 +454,7 @@ function renderStep2() {
     }
   });
 
-  blocks.push(fieldBlock('連絡用メモ（任意）', '結果通知へ付けたい内容があれば入力してください。', `
+  blocks.push(fieldBlock('ご相談時メモ（任意）', 'あとでご相談しやすいよう、任意でご入力いただけます。', `
     <div class="field-row">
       <div class="field">
         <label>お名前</label>
@@ -466,8 +472,8 @@ function renderStep2() {
   `));
 
   setBody(step, `
-    <div class="progress-pills"><span class="pill done">1. はじめる前に</span><span class="pill done">2. 工事を選ぶ</span><span class="pill active">3. 条件を入力</span><span class="pill">4. 確認</span><span class="pill">5. 結果</span></div>
-    <div class="notice"><p>選んだ項目だけ表示しています。小さな面積や短い距離の工事でも、施工に必要な準備や手間があるため、数量だけで単純計算できない場合があります。</p></div>
+    ${progressPills(2)}
+    <div class="notice"><p>選んだ項目だけ表示しています。小さな面積や短い距離の工事でも、準備や施工条件により最低施工金額が反映される場合があります。</p></div>
     <div style="margin-top:16px">${blocks.join('')}</div>
   `);
 
@@ -476,19 +482,18 @@ function renderStep2() {
       const key = e.target.dataset.key;
       const name = e.target.dataset.name;
       state.inputs[key][name] = e.target.value;
-      render();
     });
   });
 
   setActions(step, [
     { label: '戻る', className: 'secondary', onClick: () => { state.step = 1; render(); } },
-    { label: '確認へ', className: 'primary', onClick: () => { state.step = 3; render(); } },
+    { label: '内容を確認する', className: 'primary', onClick: () => { state.step = 3; render(); } },
   ]);
   return step;
 }
 
 function renderStep3() {
-  const step = createStep(3, '入力内容の確認');
+  const step = createStep(3, '内容を確認');
   const lines = state.selected.map((key) => {
     if (key === 'fence_mesh') {
       const v = state.inputs.fence_mesh;
@@ -506,40 +511,28 @@ function renderStep3() {
   }).join('');
 
   setBody(step, `
-    <div class="progress-pills"><span class="pill done">1. はじめる前に</span><span class="pill done">2. 工事を選ぶ</span><span class="pill done">3. 条件を入力</span><span class="pill active">4. 確認</span><span class="pill">5. 結果</span></div>
-    <p class="muted">この内容で概算結果を表示します。こちらは概算の目安です。内容を確認してご相談いただけます。</p>
+    ${progressPills(3)}
+    <p class="muted">この内容で概算目安を表示します。入力内容をご確認ください。</p>
     <div class="summary-list">${lines || '<div class="summary-item">選択された項目がありません。</div>'}</div>
   `);
   setActions(step, [
     { label: '戻る', className: 'secondary', onClick: () => { state.step = 2; render(); } },
-    { label: 'この内容で概算を見る', className: 'primary', onClick: async () => {
-        const results = computeResults();
-        await notifyResult({
-          startedAt: state.startedAt,
-          displayedAt: new Date().toISOString(),
-          sessionId: state.sessionId,
-          selected: state.selected,
-          inputs: state.inputs,
-          results,
-        });
-        state.step = 4;
-        render();
-      } },
+    { label: 'この内容で概算を見る', className: 'primary', onClick: () => { state.step = 4; render(); } },
   ]);
   return step;
 }
 
 function renderStep4() {
-  const step = createStep(4, '概算結果');
+  const step = createStep(4, '概算を見る');
   const results = computeResults();
   const consultHtml = results.consult.length
-    ? `<div style="margin-top:16px"><h3>相談項目</h3>${results.consult.map((c) => `<span class="tag">${c}</span>`).join('')}</div>`
+    ? `<div style="margin-top:16px"><h3>ご相談内容</h3>${results.consult.map((c) => `<span class="tag">${c}</span>`).join('')}</div>`
     : '';
 
   setBody(step, `
-    <div class="progress-pills"><span class="pill done">1. はじめる前に</span><span class="pill done">2. 工事を選ぶ</span><span class="pill done">3. 条件を入力</span><span class="pill done">4. 確認</span><span class="pill active">5. 結果</span></div>
+    ${progressPills(4)}
     <div class="notice">
-      <p>工事項目別の目安を中心に表示しています。最終的な正式見積もりは、現地状況・搬入条件・下地状況・既存物の有無などを確認したうえでご案内となります。</p>
+      <p>選択された工事の概算目安です。工事項目ごとの金額を中心に表示しています。正式なお見積もりは、現地状況や施工条件を確認したうえでご案内いたします。</p>
     </div>
 
     <div class="result-list" style="margin-top:16px">
@@ -549,7 +542,7 @@ function renderStep4() {
           <div class="price">${formatRange(item.low, item.high)}</div>
           <div class="detail">
             ${item.quantity ? `入力数量：${item.quantity}${item.unit}` : '定額レンジ'}
-            ${item.rule === 'minimum' ? ' ／ 小規模のため最低施工価格を反映' : ''}
+            ${item.rule === 'minimum' ? ' ／ 小規模のため最低施工金額を反映' : ''}
           </div>
         </div>
       `).join('') : '<div class="result-item"><h4>概算対象がありません</h4><div class="detail">選択内容を見直してください。</div></div>'}
@@ -564,9 +557,9 @@ function renderStep4() {
     ${consultHtml}
   `);
   setActions(step, [
-    { label: 'この内容で相談する', className: 'primary', onClick: () => alert('LINE相談導線やフォーム遷移をここへ接続してください。') },
+    { label: 'この内容で相談する', className: 'primary', onClick: () => alert('相談導線の接続先を設定してください。') },
     { label: '一覧にない工事も相談する', className: 'ghost', onClick: () => { state.selected = Array.from(new Set([...state.selected, 'custom_consult'])); state.step = 2; render(); } },
-    { label: 'もう一度最初から入力する', className: 'secondary', onClick: () => { window.location.reload(); } },
+    { label: 'もう一度はじめから入力する', className: 'secondary', onClick: () => { window.location.reload(); } },
   ]);
   return step;
 }
@@ -576,34 +569,10 @@ function render() {
   const steps = [renderStep0, renderStep1, renderStep2, renderStep3, renderStep4];
   app.appendChild(steps[state.step]());
 
-  const debug = document.createElement('div');
-  debug.className = 'card';
-  debug.style.marginTop = '12px';
-  debug.innerHTML = `
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
-      <strong>デバッグ情報</strong>
-      <span style="font-size:12px;color:#5d6b63">${state.appVersion} / step ${state.step + 1}</span>
-    </div>
-    <div style="margin-top:8px;font-size:12px;color:#5d6b63;line-height:1.7">
-      開始通知: ${state.startedNotified ? '送信済み' : '未送信'} / 結果通知: ${state.resultNotified ? '送信済み' : '未送信'}
-    </div>
-    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
-      <button type="button" id="debug-start" class="secondary">開始通知を手動送信</button>
-      <button type="button" id="debug-result" class="secondary">結果通知を手動送信</button>
-    </div>
-    <pre style="margin-top:10px;background:#f5f7f4;border-radius:12px;padding:10px;font-size:12px;white-space:pre-wrap">${state.debugLog.join('\n') || 'まだログなし'}</pre>
-  `;
-  app.appendChild(debug);
-  debug.querySelector('#debug-start').addEventListener('click', async () => { await notifyStart(); render(); });
-  debug.querySelector('#debug-result').addEventListener('click', async () => { await notifyResult(buildResultPayload()); render(); });
-
-  if (state.lastRenderedStep !== state.step) { logDebug(`render step ${state.step + 1}`); state.lastRenderedStep = state.step; }
-
-  if (state.step >= 1 && !state.startedNotified) {
+  if (state.step >= 1 && !state.startedNotified && !state.startNotifyPending) {
     notifyStart();
   }
-  if (state.step === 4 && !state.resultNotified) {
-    state.resultNotified = true;
+  if (state.step === 4 && !state.resultNotified && !state.resultNotifyPending) {
     notifyResult(buildResultPayload());
   }
 }
