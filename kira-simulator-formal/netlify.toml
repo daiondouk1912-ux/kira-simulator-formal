@@ -1,0 +1,13 @@
+[build]
+  publish = "."
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/api/notify-start"
+  to = "/.netlify/functions/notify-start"
+  status = 200
+
+[[redirects]]
+  from = "/api/notify-result"
+  to = "/.netlify/functions/notify-result"
+  status = 200

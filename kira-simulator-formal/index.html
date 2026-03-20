@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>kirA 外構概算シミュレーター 正式版</title>
+    <meta name="description" content="外構工事のおおよその費用目安を工事項目別に確認できる概算シミュレーターです。" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="hero card">
+        <p class="eyebrow">正式版</p>
+        <h1>kirA 外構概算シミュレーター</h1>
+        <p class="lead">外構工事のおおよその費用目安を確認できます。まずは気軽に費用感を見て、細かい内容はあとで相談できる作りにしています。</p>
+        <div class="hero-features">
+          <div>
+            <strong>項目別で確認</strong>
+            <span>合計だけでなく、工事項目ごとの目安を中心に表示します。</span>
+          </div>
+          <div>
+            <strong>スマホ向け</strong>
+            <span>現場でも見やすいように、入力はできるだけ簡単にしています。</span>
+          </div>
+          <div>
+            <strong>相談につながる</strong>
+            <span>一覧にない工事や迷う内容は、あとから相談に回せます。</span>
+          </div>
+        </div>
+      </header>
+
+      <main id="app"></main>
+    </div>
+
+    <template id="step-template">
+      <section class="card flow-card">
+        <div class="step-head">
+          <span class="step-index"></span>
+          <h2 class="step-title"></h2>
+        </div>
+        <div class="step-body"></div>
+        <div class="step-actions"></div>
+      </section>
+    </template>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
