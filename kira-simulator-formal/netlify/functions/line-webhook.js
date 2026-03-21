@@ -41,7 +41,7 @@ exports.handler = async (event) => {
     const userId = ev?.source?.userId;
     const replyToken = ev?.replyToken;
     if (!userId || !replyToken) continue;
-    if (ev.type === 'message' || ev.type === 'follow') {
+    if (ev.type === 'follow') {
       const text = [
         '接続OKです。',
         `userId: ${userId}`,
