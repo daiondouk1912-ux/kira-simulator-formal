@@ -36,7 +36,6 @@ exports.handler = async (event) => {
   const events = Array.isArray(payload.events) ? payload.events : [];
   if (events.length === 0) return json(200, { ok: true, events: 0 });
 
- 
  const replies = [];
 for (const ev of events) {
   const userId = ev?.source?.userId;
