@@ -41,7 +41,16 @@ exports.handler = async (event) => {
     const userId = ev?.source?.userId;
     const replyToken = ev?.replyToken;
     if (!userId || !replyToken) continue;
-  
+  if (ev.type === 'follow') {
+  const text = '友だち追加ありがとうございます。ご相談はトークからお気軽にご連絡ください。';
+
+  try {
+    await replyText(replyToken, text);
+    replies.push({ ok: true, userId });
+  } catch (error) {
+    replies.push({ ok: false, userId, error: error.message });
+  }
+}
   }
 
   return json(200, { ok: true, replies });
