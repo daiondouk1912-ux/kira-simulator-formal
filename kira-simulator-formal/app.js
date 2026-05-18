@@ -132,6 +132,8 @@ const state = {
   startedAt: null,
   sessionId: '',
   receiptNo: '',
+  sessionCreatedAt: null,
+  sessionMessage: '',
   startedNotified: false,
   resultNotified: false,
   startNotifyPending: false,
@@ -163,6 +165,8 @@ const state = {
 const app = document.getElementById('app');
 const STEP_LABELS = ['スタート', '工事を選ぶ', '内容を入力', '内容を確認', '概算を見る'];
 const LINE_TALK_URL = 'https://line.me/R/oaMessage/%40963rsnpu';
+const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
+const APP_VERSION = 'v11-session-benefit';
 
 function fnUrl(name) {
   return `${window.location.origin}/.netlify/functions/${name}`;
@@ -182,9 +186,35 @@ function generateReceiptNo() {
   return code;
 }
 
+function resetNotifyFlags() {
+  state.startedNotified = false;
+  state.resultNotified = false;
+  state.selectionNotified = false;
+  state.inputNotified = false;
+  state.consultNotified = false;
+  state.startNotifyPending = false;
+  state.resultNotifyPending = false;
+  state.eventNotifyPending = false;
+}
+
+function startNewSession(showMessage = false) {
+  state.startedAt = new Date().toISOString();
+  state.sessionId = `sim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  state.receiptNo = generateReceiptNo();
+  state.sessionCreatedAt = Date.now();
+  resetNotifyFlags();
+  if (showMessage) {
+    state.sessionMessage = `一定時間が経過したため、新しい受付番号（${state.receiptNo}）で再開します。`;
+  }
+}
+
+function isSessionExpired() {
+  return !!state.sessionCreatedAt && (Date.now() - state.sessionCreatedAt > SESSION_TIMEOUT_MS);
+}
+
 function ensureSession() {
-  if (!state.sessionId) state.sessionId = `sim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  if (!state.receiptNo) state.receiptNo = generateReceiptNo();
+  if (!state.sessionId || !state.receiptNo || !state.sessionCreatedAt) startNewSession(false);
+  else if (isSessionExpired()) startNewSession(true);
   return { sessionId: state.sessionId, receiptNo: state.receiptNo };
 }
 
@@ -357,7 +387,7 @@ async function notifyStart() {
         receiptNo: state.receiptNo,
         projectArea: getProjectArea(),
         userAgent: navigator.userAgent,
-        appVersion: 'v10-step-consult-notify',
+        appVersion: APP_VERSION,
       }),
     });
     const data = await response.json().catch(() => ({}));
@@ -376,7 +406,7 @@ async function notifyResult(payload) {
     const response = await fetch(fnUrl('notify-result'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...payload, appVersion: 'v10-step-consult-notify' }),
+      body: JSON.stringify({ ...payload, appVersion: APP_VERSION }),
     });
     const data = await response.json().catch(() => ({}));
     if (response.ok && data.ok) state.resultNotified = true;
@@ -442,7 +472,7 @@ async function notifyEvent(eventType) {
     const response = await fetch(fnUrl('notify-event'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...buildEventPayload(eventType), appVersion: 'v10-step-consult-notify' }),
+      body: JSON.stringify({ ...buildEventPayload(eventType), appVersion: APP_VERSION }),
     });
     const data = await response.json().catch(() => ({}));
     if (response.ok && data.ok && key) state[key] = true;
@@ -473,6 +503,7 @@ function renderStep0() {
   const step = createStep(0, 'スタート');
   setBody(step, `
     ${progressPills(0)}
+    ${state.sessionMessage ? `<div class="session-notice">${sanitizeText(state.sessionMessage)}</div>` : ''}
     <div class="grid">
       <div class="notice">
         <p>駐車場のコンクリート、フェンス、人工芝、カーポートなど、気になる工事の概算目安をご確認いただけます。まずは工事を選んで進んでください。</p>
@@ -750,6 +781,11 @@ function renderStep4() {
       <p class="small">※ 合計は参考表示です。主役は上の工事項目別表示です。</p>
     </div>
 
+    <div class="benefit-note">
+      <strong>シミュレーターからのご相談特典</strong>
+      <p>概算シミュレーターからご相談いただいた方には、工事内容に応じて特典をご案内できる場合があります。</p>
+    </div>
+
     ${consultHtml}
   `);
   setActions(step, [
@@ -761,6 +797,7 @@ function renderStep4() {
 }
 
 function render() {
+  ensureSession();
   app.innerHTML = '';
   const steps = [renderStep0, renderStep1, renderStep2, renderStep3, renderStep4];
   app.appendChild(steps[state.step]());

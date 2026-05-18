@@ -261,3 +261,32 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 }
 
 .field-help { margin: 8px 0 0; color: var(--muted); font-size: 13px; }
+
+
+/* v11: 特典表示・セッション制御 */
+.benefit-note {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid #d5e5d8;
+  background: #f7fbf7;
+}
+.benefit-note strong {
+  display: block;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+.benefit-note p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+.session-notice {
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #fffbe8;
+  color: #5f5200;
+  border: 1px solid #efe0a2;
+  font-weight: 700;
+}
