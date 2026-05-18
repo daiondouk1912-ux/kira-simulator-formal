@@ -110,7 +110,7 @@ const WORK_OPTIONS = [
   { id: 'block_break_top', label: 'ブロック解体（上だけ）', note: '上積み部分のみ解体' },
   { id: 'block_break_base', label: 'ブロック解体（ベースごと）', note: '基礎ごと撤去する解体' },
   { id: 'fence_remove', label: 'フェンス撤去', note: '既存フェンスの撤去' },
-  { id: 'custom_consult', label: '一覧にない工事も相談', note: '概算にない内容も最後に相談可能' },
+  { id: 'custom_consult', label: 'その他の工事・気になる内容', note: '項目にない工事や迷う内容を入力できます' },
 ];
 
 const AREA_KEYS = new Set(['concrete', 'gravel', 'weed_gravel', 'turf', 'concrete_break']);
@@ -136,6 +136,10 @@ const state = {
   resultNotified: false,
   startNotifyPending: false,
   resultNotifyPending: false,
+  eventNotifyPending: false,
+  selectionNotified: false,
+  inputNotified: false,
+  consultNotified: false,
   selected: [],
   projectArea: '',
   inputs: {
@@ -353,7 +357,7 @@ async function notifyStart() {
         receiptNo: state.receiptNo,
         projectArea: getProjectArea(),
         userAgent: navigator.userAgent,
-        appVersion: 'v9-area-receipt-input',
+        appVersion: 'v10-step-consult-notify',
       }),
     });
     const data = await response.json().catch(() => ({}));
@@ -372,7 +376,7 @@ async function notifyResult(payload) {
     const response = await fetch(fnUrl('notify-result'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...payload, appVersion: 'v9-area-receipt-input' }),
+      body: JSON.stringify({ ...payload, appVersion: 'v10-step-consult-notify' }),
     });
     const data = await response.json().catch(() => ({}));
     if (response.ok && data.ok) state.resultNotified = true;
@@ -382,6 +386,73 @@ async function notifyResult(payload) {
     state.resultNotifyPending = false;
   }
 }
+
+function selectedLabels() {
+  return state.selected.map((key) => WORK_OPTIONS.find((item) => item.id === key)?.label || key);
+}
+
+function currentInputSummary() {
+  const parts = [];
+  for (const key of state.selected) {
+    if (QUANTITY_KEYS.includes(key)) {
+      const meta = PRICE_MASTER[key];
+      parts.push(`${meta.label}: ${quantityInputLabel(key)}`);
+    } else if (key === 'fence_mesh') {
+      const v = state.inputs.fence_mesh;
+      const methodMap = { new: '通常新設', core: '既存ブロック上・コア抜き', block_add: 'ブロック1段追加' };
+      parts.push(`メッシュフェンス: ${methodMap[v.method] || '-'} / 長さ${v.length || '-'}m`);
+    } else if (key === 'carport') {
+      parts.push(`カーポート: ${state.inputs.carport.size || '-'}台用`);
+    } else if (key === 'custom_consult') {
+      parts.push(`その他: ${state.inputs.custom_consult.note || '未入力'}`);
+    }
+  }
+  return parts;
+}
+
+function buildEventPayload(eventType) {
+  ensureSession();
+  const results = computeResults();
+  return {
+    eventType,
+    eventAt: new Date().toISOString(),
+    sessionId: state.sessionId,
+    receiptNo: state.receiptNo,
+    projectArea: getProjectArea(),
+    selected: state.selected,
+    selectedLabels: selectedLabels(),
+    inputSummary: currentInputSummary(),
+    inputs: state.inputs,
+    results,
+  };
+}
+
+async function notifyEvent(eventType) {
+  if (state.eventNotifyPending) return;
+  const notifiedKeyMap = {
+    selection_complete: 'selectionNotified',
+    input_complete: 'inputNotified',
+    consult_clicked: 'consultNotified',
+  };
+  const key = notifiedKeyMap[eventType];
+  if (key && state[key]) return;
+
+  state.eventNotifyPending = true;
+  try {
+    const response = await fetch(fnUrl('notify-event'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...buildEventPayload(eventType), appVersion: 'v10-step-consult-notify' }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok && data.ok && key) state[key] = true;
+  } catch (error) {
+    console.warn('event notify failed', error);
+  } finally {
+    state.eventNotifyPending = false;
+  }
+}
+
 
 function buildResultPayload() {
   const results = computeResults();
@@ -453,7 +524,7 @@ function renderStep1() {
   });
   setActions(step, [
     { label: '戻る', className: 'secondary', onClick: () => { state.step = 0; render(); } },
-    { label: '次へ', className: 'primary', disabled: state.selected.length === 0, onClick: () => { state.step = 2; render(); } },
+    { label: '次へ', className: 'primary', disabled: state.selected.length === 0, onClick: async () => { await notifyEvent('selection_complete'); state.step = 2; render(); } },
   ]);
   return step;
 }
@@ -574,10 +645,11 @@ function renderStep2() {
       `));
     }
     if (key === 'custom_consult') {
-      blocks.push(fieldBlock('一覧にない工事も相談', '気になる内容や工事名があればご入力ください。', `
+      blocks.push(fieldBlock('その他の工事・気になる内容', '一覧にない工事や、どれを選べばいいか分からない内容があればご入力ください。', `
         <div class="field">
-          <label>相談したい内容</label>
-          <textarea data-key="custom_consult" data-name="note" placeholder="例）門柱のやり替え、階段補修、土留めの相談など">${sanitizeText(state.inputs.custom_consult.note || '')}</textarea>
+          <label>その他の工事内容</label>
+          <textarea data-key="custom_consult" data-name="note" placeholder="例）門柱のやり替え、階段補修、土留め、サンルーム、ガレージなど">${sanitizeText(state.inputs.custom_consult.note || '')}</textarea>
+          <p class="field-help">入力内容は、結果画面でまとめて確認できます。詳しく相談したい場合は、最後の「この内容で相談する」からLINEへお進みください。</p>
         </div>
       `));
     }
@@ -608,7 +680,7 @@ function renderStep2() {
 
   setActions(step, [
     { label: '戻る', className: 'secondary', onClick: () => { state.step = 1; render(); } },
-    { label: '内容を確認する', className: 'primary', onClick: () => { state.step = 3; render(); } },
+    { label: '内容を確認する', className: 'primary', onClick: async () => { await notifyEvent('input_complete'); state.step = 3; render(); } },
   ]);
   return step;
 }
@@ -625,7 +697,7 @@ function renderStep3() {
       return `<div class="summary-item"><h4>カーポート</h4><div>台数：${state.inputs.carport.size}台用</div></div>`;
     }
     if (key === 'custom_consult') {
-      return `<div class="summary-item"><h4>一覧にない工事も相談</h4><div>${sanitizeText(state.inputs.custom_consult.note || '未入力')}</div></div>`;
+      return `<div class="summary-item"><h4>その他の工事・気になる内容</h4><div>${sanitizeText(state.inputs.custom_consult.note || '未入力')}</div></div>`;
     }
     const meta = PRICE_MASTER[key];
     return `<div class="summary-item"><h4>${meta.label}</h4><div>入力内容：${quantityInputLabel(key)}</div></div>`;
@@ -681,8 +753,8 @@ function renderStep4() {
     ${consultHtml}
   `);
   setActions(step, [
-    { label: 'この内容で相談する', className: 'primary', onClick: () => { window.location.href = LINE_TALK_URL; } },
-    { label: '一覧にない工事も相談する', className: 'ghost', onClick: () => { state.selected = Array.from(new Set([...state.selected, 'custom_consult'])); state.step = 2; render(); } },
+    { label: 'この内容で相談する', className: 'primary', onClick: async () => { await notifyEvent('consult_clicked'); window.location.href = LINE_TALK_URL; } },
+    { label: 'その他の工事も入力する', className: 'ghost', onClick: () => { state.selected = Array.from(new Set([...state.selected, 'custom_consult'])); state.step = 2; render(); } },
     { label: 'もう一度はじめから入力する', className: 'secondary', onClick: () => { window.location.reload(); } },
   ]);
   return step;
