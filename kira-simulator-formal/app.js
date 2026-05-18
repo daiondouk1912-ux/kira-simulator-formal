@@ -166,7 +166,7 @@ const app = document.getElementById('app');
 const STEP_LABELS = ['スタート', '工事を選ぶ', '内容を入力', '内容を確認', '概算を見る'];
 const LINE_TALK_URL = 'https://line.me/R/oaMessage/%40963rsnpu';
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
-const APP_VERSION = 'v11-session-benefit';
+const APP_VERSION = 'v11-session-benefit-intro';
 
 function fnUrl(name) {
   return `${window.location.origin}/.netlify/functions/${name}`;
@@ -507,6 +507,10 @@ function renderStep0() {
     <div class="grid">
       <div class="notice">
         <p>駐車場のコンクリート、フェンス、人工芝、カーポートなど、気になる工事の概算目安をご確認いただけます。まずは工事を選んで進んでください。</p>
+      </div>
+      <div class="benefit-note intro-benefit">
+        <strong>シミュレーター利用後のご相談特典</strong>
+        <p>概算シミュレーターをご利用後にご相談いただいた方には、工事内容に応じて特典をご案内できる場合があります。</p>
       </div>
       <div class="area-start-box">
         <label for="project-area">施工予定地のエリア（任意）</label>
