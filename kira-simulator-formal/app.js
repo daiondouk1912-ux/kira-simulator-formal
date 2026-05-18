@@ -113,36 +113,52 @@ const WORK_OPTIONS = [
   { id: 'custom_consult', label: '一覧にない工事も相談', note: '概算にない内容も最後に相談可能' },
 ];
 
+const AREA_KEYS = new Set(['concrete', 'gravel', 'weed_gravel', 'turf', 'concrete_break']);
+const QUANTITY_KEYS = ['concrete','gravel','weed_gravel','turf','privacy_fence','block_add','block_new','concrete_break','block_break_top','block_break_base','fence_remove'];
+const PRESET_AREAS = {
+  approach: { label: 'アプローチ程度（約5㎡）', value: 5 },
+  car1: { label: '車1台分程度（約15㎡）', value: 15 },
+  car2: { label: '車2台分程度（約30㎡）', value: 30 },
+  garden: { label: '庭の一部（約20㎡）', value: 20 },
+  large: { label: '広めの駐車場・庭（約50㎡）', value: 50 },
+};
+
+function makeQuantityInput() {
+  return { mode: 'direct', quantity: '', length: '', width: '', preset: '' };
+}
+
 const state = {
   step: 0,
   startedAt: null,
   sessionId: '',
+  receiptNo: '',
   startedNotified: false,
   resultNotified: false,
   startNotifyPending: false,
   resultNotifyPending: false,
   selected: [],
+  projectArea: '',
   inputs: {
-    concrete: { quantity: '' },
-    gravel: { quantity: '' },
-    weed_gravel: { quantity: '' },
-    turf: { quantity: '' },
+    concrete: makeQuantityInput(),
+    gravel: makeQuantityInput(),
+    weed_gravel: makeQuantityInput(),
+    turf: makeQuantityInput(),
     fence_mesh: { type: 'mesh', method: 'new', length: '' },
     privacy_fence: { quantity: '' },
     block_add: { quantity: '' },
     block_new: { quantity: '' },
     carport: { size: '1' },
-    concrete_break: { quantity: '' },
+    concrete_break: makeQuantityInput(),
     block_break_top: { quantity: '' },
     block_break_base: { quantity: '' },
     fence_remove: { quantity: '' },
     custom_consult: { note: '' },
-    customer: { name: '', phone: '', lineName: '' },
   },
 };
 
 const app = document.getElementById('app');
 const STEP_LABELS = ['スタート', '工事を選ぶ', '内容を入力', '内容を確認', '概算を見る'];
+const LINE_TALK_URL = 'https://line.me/R/oaMessage/%40963rsnpu';
 
 function fnUrl(name) {
   return `${window.location.origin}/.netlify/functions/${name}`;
@@ -153,6 +169,57 @@ function yen(value) {
 }
 function formatRange(low, high) { return `${yen(low)} 〜 ${yen(high)}`; }
 function getBracket(def, q) { return def.brackets.find((b) => q <= b.max) || def.brackets[def.brackets.length - 1]; }
+function sanitizeText(value) { return String(value || '').replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#039;' }[c])); }
+
+function generateReceiptNo() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i += 1) code += alphabet[Math.floor(Math.random() * alphabet.length)];
+  return code;
+}
+
+function ensureSession() {
+  if (!state.sessionId) state.sessionId = `sim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  if (!state.receiptNo) state.receiptNo = generateReceiptNo();
+  return { sessionId: state.sessionId, receiptNo: state.receiptNo };
+}
+
+function getProjectArea() {
+  const area = String(state.projectArea || '').trim();
+  return area || '未入力';
+}
+
+function getQuantityValue(key) {
+  const value = state.inputs[key];
+  if (!value) return 0;
+  if (!AREA_KEYS.has(key)) return Number(value.quantity || 0);
+  if (value.mode === 'size') return Number(value.length || 0) * Number(value.width || 0);
+  if (value.mode === 'preset') return PRESET_AREAS[value.preset]?.value || 0;
+  return Number(value.quantity || 0);
+}
+
+function quantityInputLabel(key) {
+  const value = state.inputs[key];
+  if (!value) return '-';
+  if (AREA_KEYS.has(key)) {
+    const q = getQuantityValue(key);
+    if (value.mode === 'size') {
+      const length = value.length || '-';
+      const width = value.width || '-';
+      return `縦${length}m × 横${width}m（約${q ? round1(q) : '-'}㎡）`;
+    }
+    if (value.mode === 'preset') {
+      return `${PRESET_AREAS[value.preset]?.label || '未選択'}（約${q || '-'}㎡）`;
+    }
+    return `${value.quantity || '-'}㎡`;
+  }
+  return `${value.quantity || '-'}${PRICE_MASTER[key]?.unit || ''}`;
+}
+
+function round1(value) {
+  const n = Math.round(Number(value || 0) * 10) / 10;
+  return Number.isInteger(n) ? String(n) : String(n);
+}
 
 function calcFromMaster(key, quantity) {
   const def = PRICE_MASTER[key];
@@ -163,14 +230,8 @@ function calcFromMaster(key, quantity) {
   let high = quantity * bracket.high;
   let minimumApplied = false;
   if (def.minimum) {
-    if (low < def.minimum.low) {
-      low = def.minimum.low;
-      minimumApplied = true;
-    }
-    if (high < def.minimum.high) {
-      high = def.minimum.high;
-      minimumApplied = true;
-    }
+    if (low < def.minimum.low) { low = def.minimum.low; minimumApplied = true; }
+    if (high < def.minimum.high) { high = def.minimum.high; minimumApplied = true; }
   }
   return {
     label: def.label,
@@ -179,6 +240,7 @@ function calcFromMaster(key, quantity) {
     quantity,
     unit: def.unit,
     rule: minimumApplied ? 'minimum' : 'unit',
+    inputText: quantityInputLabel(key),
   };
 }
 
@@ -213,6 +275,7 @@ function calcMeshFence({ type, method, length }) {
     quantity: q,
     unit: 'm',
     rule: minimumApplied ? 'minimum' : 'unit',
+    inputText: `長さ：${length || '-'}m / 設置方法：${variant}`,
     meta: { type, method, variant },
   };
 }
@@ -222,8 +285,8 @@ function computeResults() {
   const consult = [];
 
   for (const key of state.selected) {
-    if (['concrete','gravel','weed_gravel','turf','privacy_fence','block_add','block_new','concrete_break','block_break_top','block_break_base','fence_remove'].includes(key)) {
-      const result = calcFromMaster(key, Number(state.inputs[key].quantity));
+    if (QUANTITY_KEYS.includes(key)) {
+      const result = calcFromMaster(key, getQuantityValue(key));
       if (result) items.push(result);
     }
     if (key === 'fence_mesh') {
@@ -232,8 +295,8 @@ function computeResults() {
     }
     if (key === 'carport') {
       const size = state.inputs.carport.size;
-      if (size === '1') items.push({ ...calcFromMaster('carport1', 1), label: 'カーポート1台用' });
-      else if (size === '2') items.push({ ...calcFromMaster('carport2', 1), label: 'カーポート2台用' });
+      if (size === '1') items.push({ ...calcFromMaster('carport1', 1), label: 'カーポート1台用', inputText: '1台用' });
+      else if (size === '2') items.push({ ...calcFromMaster('carport2', 1), label: 'カーポート2台用', inputText: '2台用' });
       else consult.push('カーポート3台用');
     }
     if (key === 'custom_consult') {
@@ -279,12 +342,19 @@ async function notifyStart() {
   if (state.startedNotified || state.startNotifyPending) return;
   state.startNotifyPending = true;
   state.startedAt = state.startedAt || new Date().toISOString();
-  state.sessionId = state.sessionId || `sim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  ensureSession();
   try {
     const response = await fetch(fnUrl('notify-start'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ startedAt: state.startedAt, sessionId: state.sessionId, userAgent: navigator.userAgent, appVersion: 'v8-public-release' }),
+      body: JSON.stringify({
+        startedAt: state.startedAt,
+        sessionId: state.sessionId,
+        receiptNo: state.receiptNo,
+        projectArea: getProjectArea(),
+        userAgent: navigator.userAgent,
+        appVersion: 'v9-area-receipt-input',
+      }),
     });
     const data = await response.json().catch(() => ({}));
     if (response.ok && data.ok) state.startedNotified = true;
@@ -302,7 +372,7 @@ async function notifyResult(payload) {
     const response = await fetch(fnUrl('notify-result'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...payload, appVersion: 'v8-public-release' }),
+      body: JSON.stringify({ ...payload, appVersion: 'v9-area-receipt-input' }),
     });
     const data = await response.json().catch(() => ({}));
     if (response.ok && data.ok) state.resultNotified = true;
@@ -315,9 +385,12 @@ async function notifyResult(payload) {
 
 function buildResultPayload() {
   const results = computeResults();
+  ensureSession();
   return {
     displayedAt: new Date().toISOString(),
-    sessionId: state.sessionId || `sim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    sessionId: state.sessionId,
+    receiptNo: state.receiptNo,
+    projectArea: getProjectArea(),
     startedAt: state.startedAt,
     selected: state.selected,
     inputs: state.inputs,
@@ -333,11 +406,18 @@ function renderStep0() {
       <div class="notice">
         <p>駐車場のコンクリート、フェンス、人工芝、カーポートなど、気になる工事の概算目安をご確認いただけます。まずは工事を選んで進んでください。</p>
       </div>
+      <div class="area-start-box">
+        <label for="project-area">施工予定地のエリア（任意）</label>
+        <input id="project-area" type="text" value="${sanitizeText(state.projectArea)}" placeholder="例）いわき市中央台、平、内郷、小名浜、泉町など" />
+        <p>番地までの入力は不要です。エリアが分かると、施工条件や対応地域を踏まえて確認しやすくなります。</p>
+      </div>
       <div class="subnotice">
         <p>※ 表示金額は概算の目安です。現地状況や施工条件により変動します。正式なお見積もりは現地確認後にご案内いたします。</p>
       </div>
     </div>
   `);
+  const areaInput = step.querySelector('#project-area');
+  areaInput.addEventListener('input', (e) => { state.projectArea = e.target.value; });
   setActions(step, [
     { label: 'シミュレーターをはじめる', className: 'primary', onClick: () => { state.step = 1; render(); } },
   ]);
@@ -390,21 +470,70 @@ function fieldBlock(title, description, content) {
   `;
 }
 
+function renderAreaInputBlock(key, meta) {
+  const input = state.inputs[key];
+  const q = getQuantityValue(key);
+  return fieldBlock(meta.label, '面積が分かる方は㎡で、分からない方は縦×横や目安から入力できます。', `
+    <div class="input-methods" data-method-group="${key}">
+      <label><input type="radio" name="mode-${key}" data-key="${key}" data-name="mode" value="direct" ${input.mode === 'direct' ? 'checked' : ''} />㎡で入力</label>
+      <label><input type="radio" name="mode-${key}" data-key="${key}" data-name="mode" value="size" ${input.mode === 'size' ? 'checked' : ''} />縦×横で入力</label>
+      <label><input type="radio" name="mode-${key}" data-key="${key}" data-name="mode" value="preset" ${input.mode === 'preset' ? 'checked' : ''} />目安から選ぶ</label>
+    </div>
+    ${input.mode === 'size' ? `
+      <div class="field-row two-cols">
+        <div class="field">
+          <label>縦（m）</label>
+          <input type="number" min="0" step="0.1" data-key="${key}" data-name="length" value="${input.length}" placeholder="例）5" />
+        </div>
+        <div class="field">
+          <label>横（m）</label>
+          <input type="number" min="0" step="0.1" data-key="${key}" data-name="width" value="${input.width}" placeholder="例）4" />
+        </div>
+      </div>
+    ` : ''}
+    ${input.mode === 'preset' ? `
+      <div class="field-row one-col">
+        <div class="field">
+          <label>目安</label>
+          <select data-key="${key}" data-name="preset">
+            <option value="" ${input.preset === '' ? 'selected' : ''}>選択してください</option>
+            ${Object.entries(PRESET_AREAS).map(([presetKey, preset]) => `<option value="${presetKey}" ${input.preset === presetKey ? 'selected' : ''}>${preset.label}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+    ` : ''}
+    ${input.mode === 'direct' ? `
+      <div class="field-row one-col">
+        <div class="field">
+          <label>面積（㎡）</label>
+          <input type="number" min="0" step="0.1" data-key="${key}" data-name="quantity" value="${input.quantity}" placeholder="例）20" />
+        </div>
+      </div>
+    ` : ''}
+    <p class="calc-preview">概算に使う面積：<strong>${q ? `${round1(q)}㎡` : '未入力'}</strong></p>
+  `);
+}
+
+function renderSimpleQuantityBlock(key, meta) {
+  return fieldBlock(meta.label, `${meta.unit}数をご入力ください。数量をもとに概算目安を算出します。`, `
+    <div class="field-row one-col">
+      <div class="field">
+        <label>${meta.unit}数</label>
+        <input type="number" min="0" step="0.1" data-key="${key}" data-name="quantity" value="${state.inputs[key].quantity}" placeholder="例）12" />
+      </div>
+    </div>
+  `);
+}
+
 function renderStep2() {
   const step = createStep(2, '内容を入力');
   const blocks = [];
 
   state.selected.forEach((key) => {
-    if (['concrete','gravel','weed_gravel','turf','privacy_fence','block_add','block_new','concrete_break','block_break_top','block_break_base','fence_remove'].includes(key)) {
+    if (QUANTITY_KEYS.includes(key)) {
       const meta = PRICE_MASTER[key];
-      blocks.push(fieldBlock(meta.label, `${meta.unit}数をご入力ください。数量をもとに概算目安を算出します。`, `
-        <div class="field-row">
-          <div class="field">
-            <label>${meta.unit}数</label>
-            <input type="number" min="0" step="0.1" data-key="${key}" data-name="quantity" value="${state.inputs[key].quantity}" placeholder="例）12" />
-          </div>
-        </div>
-      `));
+      if (AREA_KEYS.has(key)) blocks.push(renderAreaInputBlock(key, meta));
+      else blocks.push(renderSimpleQuantityBlock(key, meta));
     }
     if (key === 'fence_mesh') {
       blocks.push(fieldBlock('メッシュフェンス', '設置方法と長さをもとに概算目安を表示します。', `
@@ -432,7 +561,7 @@ function renderStep2() {
     }
     if (key === 'carport') {
       blocks.push(fieldBlock('カーポート', '台数に合わせて概算目安を切り替えます。', `
-        <div class="field-row">
+        <div class="field-row one-col">
           <div class="field">
             <label>台数</label>
             <select data-key="carport" data-name="size">
@@ -448,32 +577,15 @@ function renderStep2() {
       blocks.push(fieldBlock('一覧にない工事も相談', '気になる内容や工事名があればご入力ください。', `
         <div class="field">
           <label>相談したい内容</label>
-          <textarea data-key="custom_consult" data-name="note" placeholder="例）門柱のやり替え、階段補修、土留めの相談など">${state.inputs.custom_consult.note || ''}</textarea>
+          <textarea data-key="custom_consult" data-name="note" placeholder="例）門柱のやり替え、階段補修、土留めの相談など">${sanitizeText(state.inputs.custom_consult.note || '')}</textarea>
         </div>
       `));
     }
   });
 
-  blocks.push(fieldBlock('ご相談時メモ（任意）', 'あとでご相談しやすいよう、任意でご入力いただけます。', `
-    <div class="field-row">
-      <div class="field">
-        <label>お名前</label>
-        <input type="text" data-key="customer" data-name="name" value="${state.inputs.customer.name}" placeholder="例）山田" />
-      </div>
-      <div class="field">
-        <label>電話番号</label>
-        <input type="text" data-key="customer" data-name="phone" value="${state.inputs.customer.phone}" placeholder="例）090-1234-5678" />
-      </div>
-      <div class="field">
-        <label>LINE名</label>
-        <input type="text" data-key="customer" data-name="lineName" value="${state.inputs.customer.lineName}" placeholder="例）ヤマダ様" />
-      </div>
-    </div>
-  `));
-
   setBody(step, `
     ${progressPills(2)}
-    <div class="notice"><p>選んだ項目だけ表示しています。小さな面積や短い距離の工事でも、準備や施工条件により最低施工金額が反映される場合があります。</p></div>
+    <div class="notice"><p>面積が分からない場合は、縦×横や目安選択でも進められます。小さな面積や短い距離の工事でも、準備や施工条件により最低施工金額が反映される場合があります。</p></div>
     <div style="margin-top:16px">${blocks.join('')}</div>
   `);
 
@@ -481,7 +593,16 @@ function renderStep2() {
     el.addEventListener('input', (e) => {
       const key = e.target.dataset.key;
       const name = e.target.dataset.name;
+      if (!key || !name) return;
       state.inputs[key][name] = e.target.value;
+      if (name === 'mode') render();
+    });
+    el.addEventListener('change', (e) => {
+      const key = e.target.dataset.key;
+      const name = e.target.dataset.name;
+      if (!key || !name) return;
+      state.inputs[key][name] = e.target.value;
+      if (name === 'mode' || name === 'preset') render();
     });
   });
 
@@ -504,15 +625,16 @@ function renderStep3() {
       return `<div class="summary-item"><h4>カーポート</h4><div>台数：${state.inputs.carport.size}台用</div></div>`;
     }
     if (key === 'custom_consult') {
-      return `<div class="summary-item"><h4>一覧にない工事も相談</h4><div>${state.inputs.custom_consult.note || '未入力'}</div></div>`;
+      return `<div class="summary-item"><h4>一覧にない工事も相談</h4><div>${sanitizeText(state.inputs.custom_consult.note || '未入力')}</div></div>`;
     }
     const meta = PRICE_MASTER[key];
-    return `<div class="summary-item"><h4>${meta.label}</h4><div>${meta.unit}数：${state.inputs[key].quantity || '-'}</div></div>`;
+    return `<div class="summary-item"><h4>${meta.label}</h4><div>入力内容：${quantityInputLabel(key)}</div></div>`;
   }).join('');
 
   setBody(step, `
     ${progressPills(3)}
     <p class="muted">この内容で概算目安を表示します。入力内容をご確認ください。</p>
+    <div class="summary-meta"><span>受付番号：${state.receiptNo || '結果表示時に発行'}</span><span>エリア：${sanitizeText(getProjectArea())}</span></div>
     <div class="summary-list">${lines || '<div class="summary-item">選択された項目がありません。</div>'}</div>
   `);
   setActions(step, [
@@ -523,10 +645,11 @@ function renderStep3() {
 }
 
 function renderStep4() {
+  ensureSession();
   const step = createStep(4, '概算を見る');
   const results = computeResults();
   const consultHtml = results.consult.length
-    ? `<div style="margin-top:16px"><h3>ご相談内容</h3>${results.consult.map((c) => `<span class="tag">${c}</span>`).join('')}</div>`
+    ? `<div style="margin-top:16px"><h3>ご相談内容</h3>${results.consult.map((c) => `<span class="tag">${sanitizeText(c)}</span>`).join('')}</div>`
     : '';
 
   setBody(step, `
@@ -534,6 +657,7 @@ function renderStep4() {
     <div class="notice">
       <p>選択された工事の概算目安です。工事項目ごとの金額を中心に表示しています。正式なお見積もりは、現地状況や施工条件を確認したうえでご案内いたします。</p>
     </div>
+    <div class="summary-meta result-meta"><span>受付番号：${state.receiptNo}</span><span>エリア：${sanitizeText(getProjectArea())}</span></div>
 
     <div class="result-list" style="margin-top:16px">
       ${results.items.length ? results.items.map((item) => `
@@ -541,7 +665,7 @@ function renderStep4() {
           <h4>${item.label}</h4>
           <div class="price">${formatRange(item.low, item.high)}</div>
           <div class="detail">
-            ${item.quantity ? `入力数量：${item.quantity}${item.unit}` : '定額レンジ'}
+            ${item.inputText ? `入力内容：${item.inputText}` : item.quantity ? `入力数量：${item.quantity}${item.unit}` : '定額レンジ'}
             ${item.rule === 'minimum' ? ' ／ 小規模のため最低施工金額を反映' : ''}
           </div>
         </div>
@@ -557,7 +681,7 @@ function renderStep4() {
     ${consultHtml}
   `);
   setActions(step, [
-    { label: 'この内容で相談する', className: 'primary', onClick: () => { window.location.href = 'https://line.me/R/oaMessage/%40963rsnpu'; } },
+    { label: 'この内容で相談する', className: 'primary', onClick: () => { window.location.href = LINE_TALK_URL; } },
     { label: '一覧にない工事も相談する', className: 'ghost', onClick: () => { state.selected = Array.from(new Set([...state.selected, 'custom_consult'])); state.step = 2; render(); } },
     { label: 'もう一度はじめから入力する', className: 'secondary', onClick: () => { window.location.reload(); } },
   ]);
