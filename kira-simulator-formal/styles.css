@@ -294,3 +294,6 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .intro-benefit {
   margin: 0;
 }
+
+/* v12: 追加項目の補足表示 */
+.result-item .detail br + br { display: none; }
