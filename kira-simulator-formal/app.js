@@ -176,6 +176,7 @@ const state = {
   receiptNo: '',
   sessionCreatedAt: null,
   sessionMessage: '',
+  validationMessage: '',
   startedNotified: false,
   resultNotified: false,
   startNotifyPending: false,
@@ -216,7 +217,7 @@ const app = document.getElementById('app');
 const STEP_LABELS = ['スタート', '工事を選ぶ', '内容を入力', '内容を確認', '概算を見る'];
 const LINE_TALK_URL = 'https://line.me/R/oaMessage/%40963rsnpu';
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
-const APP_VERSION = 'v12-add-exterior-items';
+const APP_VERSION = 'v12.1-input-validation';
 
 function fnUrl(name) {
   return `${window.location.origin}/.netlify/functions/${name}`;
@@ -680,6 +681,74 @@ function buildResultPayload() {
   };
 }
 
+
+function validateSelectedInputs() {
+  const messages = [];
+  const hasPositive = (v) => Number(v || 0) > 0;
+
+  for (const key of state.selected) {
+    const label = WORK_OPTIONS.find((item) => item.id === key)?.label || key;
+    const input = state.inputs[key];
+
+    if (AREA_KEYS.has(key)) {
+      if (!input) continue;
+      if (input.mode === 'size') {
+        if (!hasPositive(input.length) || !hasPositive(input.width)) {
+          messages.push(`${label}：縦と横の両方を入力してください。分からない場合は「目安から選ぶ」をご利用ください。`);
+        }
+      } else if (input.mode === 'preset') {
+        if (!input.preset || !PRESET_AREAS[input.preset]) {
+          messages.push(`${label}：目安を選択してください。`);
+        }
+      } else if (!hasPositive(input.quantity)) {
+        messages.push(`${label}：面積を入力してください。分からない場合は「縦×横」または「目安から選ぶ」をご利用ください。`);
+      }
+      continue;
+    }
+
+    if (QUANTITY_KEYS.includes(key)) {
+      if (!hasPositive(input?.quantity)) messages.push(`${label}：数量を入力してください。`);
+      continue;
+    }
+
+    if (key === 'fence_mesh' && !hasPositive(state.inputs.fence_mesh.length)) messages.push('メッシュフェンス：長さを入力してください。');
+    if (key === 'retaining_wall') {
+      const v = state.inputs.retaining_wall;
+      if (['low_block', 'form_block'].includes(v.type) && !hasPositive(v.length)) messages.push('土留め・高低差調整：長さを入力してください。');
+    }
+    if (key === 'edging' && !hasPositive(state.inputs.edging.length)) messages.push('見切り材・境界処理：長さを入力してください。');
+    if (key === 'custom_consult' && !String(state.inputs.custom_consult.note || '').trim()) messages.push('その他の工事・気になる内容：内容を入力してください。');
+  }
+
+  return messages;
+}
+
+async function goToConfirmStep() {
+  const messages = validateSelectedInputs();
+  if (messages.length) {
+    state.validationMessage = messages.join('\n');
+    render();
+    return;
+  }
+  state.validationMessage = '';
+  await notifyEvent('input_complete');
+  state.step = 3;
+  render();
+}
+
+function goToResultStep() {
+  const messages = validateSelectedInputs();
+  if (messages.length) {
+    state.validationMessage = messages.join('\n');
+    state.step = 2;
+    render();
+    return;
+  }
+  state.validationMessage = '';
+  state.step = 4;
+  render();
+}
+
 function renderStep0() {
   const step = createStep(0, 'スタート');
   setBody(step, `
@@ -919,7 +988,8 @@ function renderStep2() {
 
   setBody(step, `
     ${progressPills(2)}
-    <div class="notice"><p>面積が分からない場合は、縦×横や目安選択でも進められます。小さな面積や短い距離の工事でも、準備や施工条件により最低施工金額が反映される場合があります。</p></div>
+    ${state.validationMessage ? `<div class="validation-notice"><strong>入力が足りない項目があります</strong><p>${sanitizeText(state.validationMessage).replace(/\n/g, '<br>')}</p></div>` : ''}
+    <div class="notice"><p>面積が分からない場合は、縦×横や目安選択でも進められます。</p></div>
     <div style="margin-top:16px">${blocks.join('')}</div>
   `);
 
@@ -929,6 +999,7 @@ function renderStep2() {
       const name = e.target.dataset.name;
       if (!key || !name) return;
       state.inputs[key][name] = e.target.value;
+      state.validationMessage = '';
       if (name === 'mode') render();
     });
     el.addEventListener('change', (e) => {
@@ -936,13 +1007,14 @@ function renderStep2() {
       const name = e.target.dataset.name;
       if (!key || !name) return;
       state.inputs[key][name] = e.target.value;
+      state.validationMessage = '';
       if (name === 'mode' || name === 'preset') render();
     });
   });
 
   setActions(step, [
     { label: '戻る', className: 'secondary', onClick: () => { state.step = 1; render(); } },
-    { label: '内容を確認する', className: 'primary', onClick: async () => { await notifyEvent('input_complete'); state.step = 3; render(); } },
+    { label: '内容を確認する', className: 'primary', onClick: goToConfirmStep },
   ]);
   return step;
 }
@@ -985,7 +1057,7 @@ function renderStep3() {
   `);
   setActions(step, [
     { label: '戻る', className: 'secondary', onClick: () => { state.step = 2; render(); } },
-    { label: 'この内容で概算を見る', className: 'primary', onClick: () => { state.step = 4; render(); } },
+    { label: 'この内容で概算を見る', className: 'primary', onClick: goToResultStep },
   ]);
   return step;
 }
@@ -1001,7 +1073,7 @@ function renderStep4() {
   setBody(step, `
     ${progressPills(4)}
     <div class="notice">
-      <p>選択された工事の概算目安です。工事項目ごとの金額を中心に表示しています。正式なお見積もりは、現地状況や施工条件を確認したうえでご案内いたします。</p>
+      <p>選択した工事の概算目安です。正式なお見積もりは現地確認後にご案内します。</p>
     </div>
     <div class="summary-meta result-meta"><span>受付番号：${state.receiptNo}</span><span>エリア：${sanitizeText(getProjectArea())}</span></div>
 
