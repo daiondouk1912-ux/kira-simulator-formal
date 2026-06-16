@@ -19,6 +19,16 @@ function compactList(values = []) {
   return items.length ? Array.from(new Set(items)).join('、') : 'なし';
 }
 
+function limitText(value, max = 1000) {
+  const text = String(value || '');
+  return text.length > max ? `${text.slice(0, max)}…（省略）` : text;
+}
+
+function trimMessage(text, max = 4500) {
+  const value = String(text || '');
+  return value.length > max ? `${value.slice(0, max)}\n…長文のため一部省略しました` : value;
+}
+
 function selectedItemsText(selected = [], results = {}) {
   const itemLabels = (results.items || []).map((item) => item.label);
   const consult = (results.consult || []).filter(Boolean);
@@ -51,15 +61,15 @@ exports.handler = async (event) => {
   const selected = body.selected || [];
   const estimatedPrice = `${yen(results.totalLow)}〜${yen(results.totalHigh)}`;
 
-  const text = [
+  const text = trimMessage([
     '概算シミュレーター結果が表示されました',
     `・受付番号: ${receiptNo}`,
     `・エリア: ${projectArea}`,
-    `・項目: ${selectedItemsText(selected, results)}`,
-    `・条件: ${inputValuesText(results)}`,
+    `・項目: ${limitText(selectedItemsText(selected, results))}`,
+    `・条件: ${limitText(inputValuesText(results))}`,
     `・概算: ${estimatedPrice}`,
     `・時間: ${time}`,
-  ].join('\n');
+  ].join('\n'));
 
   try {
     await pushText(to, text);

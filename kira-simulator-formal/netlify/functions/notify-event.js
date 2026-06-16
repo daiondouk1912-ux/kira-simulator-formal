@@ -19,6 +19,16 @@ function compactList(values = []) {
   return items.length ? Array.from(new Set(items)).join('、') : 'なし';
 }
 
+function limitText(value, max = 900) {
+  const text = String(value || '');
+  return text.length > max ? `${text.slice(0, max)}…（省略）` : text;
+}
+
+function trimMessage(text, max = 4500) {
+  const value = String(text || '');
+  return value.length > max ? `${value.slice(0, max)}\n…長文のため一部省略しました` : value;
+}
+
 function resultPrice(results = {}) {
   const low = results.totalLow || 0;
   const high = results.totalHigh || 0;
@@ -30,14 +40,15 @@ function eventTitle(eventType) {
   if (eventType === 'selection_complete') return '工事項目が選択されました';
   if (eventType === 'input_complete') return '内容入力が完了しました';
   if (eventType === 'consult_clicked') return '相談ボタンが押されました';
+  if (eventType === 'feedback_submitted') return '概算シミュレーターの感想が届きました';
   return '概算シミュレーターの操作がありました';
 }
 
 function extraLines(body) {
   const eventType = body.eventType;
   const lines = [];
-  const selected = compactList(body.selectedLabels || []);
-  const inputSummary = compactList(body.inputSummary || []);
+  const selected = limitText(compactList(body.selectedLabels || []));
+  const inputSummary = limitText(compactList(body.inputSummary || []));
   const results = body.results || {};
 
   if (eventType === 'selection_complete') {
@@ -51,6 +62,10 @@ function extraLines(body) {
     lines.push(`・項目: ${selected}`);
     lines.push(`・条件: ${inputSummary}`);
     lines.push(`・概算: ${resultPrice(results)}`);
+  } else if (eventType === 'feedback_submitted') {
+    lines.push(`・項目: ${selected}`);
+    lines.push(`・概算: ${resultPrice(results)}`);
+    lines.push(`・感想: ${limitText(body.feedbackText || '未入力', 1200)}`);
   } else {
     lines.push(`・項目: ${selected}`);
   }
@@ -67,13 +82,13 @@ exports.handler = async (event) => {
   if (!to) return json(400, { ok: false, reason: 'LINE_TARGET_USER_ID is not set' });
 
   const body = JSON.parse(event.body || '{}');
-  const text = [
+  const text = trimMessage([
     eventTitle(body.eventType),
     `・受付番号: ${body.receiptNo || '-'}`,
     `・エリア: ${body.projectArea || '未入力'}`,
     ...extraLines(body),
     `・時間: ${jstTime(body.eventAt || new Date().toISOString())}`,
-  ].join('\n');
+  ].join('\n'));
 
   try {
     await pushText(to, text);
