@@ -181,7 +181,86 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .result-item h4 { font-size:18px; }
 .notice p:last-child, .subnotice p:last-child { margin-bottom:0; }
 
-/* v13.4 概算注意書きの強調 */
+/* v9: エリア入力・受付番号・面積入力改善 */
+.area-start-box {
+  border: 1px solid #cfe0d2;
+  border-radius: 16px;
+  padding: 16px;
+  background: #f8fcf8;
+}
+.area-start-box label {
+  display: block;
+  font-weight: 800;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.area-start-box input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 13px 14px;
+  font-size: 16px;
+  background: white;
+}
+.area-start-box p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.input-methods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.input-methods label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.input-methods input { margin: 0; }
+.field-row.one-col { grid-template-columns: 1fr; }
+.field-row.two-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.calc-preview {
+  margin: 10px 0 0;
+  padding: 9px 12px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 14px;
+}
+.summary-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 14px;
+}
+.summary-meta span {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #cbe1d1;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 7px 11px;
+  font-weight: 800;
+  font-size: 13px;
+}
+.result-meta { margin-top: 14px; }
+@media (max-width: 760px) {
+  .field-row.two-cols { grid-template-columns: 1fr; }
+  .input-methods { flex-direction: column; }
+  .input-methods label { width: 100%; }
+}
+
+/* v13.5: 入力欄は以前の見やすさに戻し、注意書きだけ強調 */
 .estimate-note {
   margin-top: 10px;
   padding: 10px 12px;
@@ -195,4 +274,9 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .adjust-note {
   color: #b45309;
   font-weight: 700;
+}
+.field-help {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
 }
