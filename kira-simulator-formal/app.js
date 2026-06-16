@@ -1,4 +1,4 @@
-// v13: 公開概算マスター共通化
+// v13.2: 人工芝文言調整 + 感想欄追加
 // 計算に使う公開用レンジは publicPriceMaster.js から読み込みます。
 // 原価・人工原価・利益率などの内部情報は、このお客さま用アプリには入れません。
 const {
@@ -7,6 +7,7 @@ const {
   AREA_KEYS,
   QUANTITY_KEYS,
   PRESET_AREAS,
+  PRESET_AREAS_BY_WORK,
   V12_LABELS,
   RETAINING_TYPES,
   RETAINING_HEIGHTS,
@@ -34,6 +35,9 @@ const state = {
   selectionNotified: false,
   inputNotified: false,
   consultNotified: false,
+  feedbackNotified: false,
+  feedbackText: '',
+  feedbackMessage: '',
   selected: [],
   projectArea: '',
   inputs: {
@@ -66,7 +70,7 @@ const app = document.getElementById('app');
 const STEP_LABELS = ['スタート', '工事を選ぶ', '内容を入力', '内容を確認', '概算を見る'];
 const LINE_TALK_URL = 'https://line.me/R/oaMessage/%40963rsnpu';
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
-const APP_VERSION = 'v13-public-price-master';
+const APP_VERSION = 'v13.3-large-area-price-adjust';
 
 function fnUrl(name) {
   return `${window.location.origin}/.netlify/functions/${name}`;
@@ -78,6 +82,14 @@ function yen(value) {
 function formatRange(low, high) { return `${yen(low)} 〜 ${yen(high)}`; }
 function getBracket(def, q) { return def.brackets.find((b) => q <= b.max) || def.brackets[def.brackets.length - 1]; }
 function sanitizeText(value) { return String(value || '').replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#039;' }[c])); }
+
+function getPresetAreasForKey(key) {
+  return (PRESET_AREAS_BY_WORK && PRESET_AREAS_BY_WORK[key]) ? PRESET_AREAS_BY_WORK[key] : PRESET_AREAS;
+}
+
+function getPresetForKey(key, presetKey) {
+  return getPresetAreasForKey(key)[presetKey];
+}
 
 function generateReceiptNo() {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -92,6 +104,9 @@ function resetNotifyFlags() {
   state.selectionNotified = false;
   state.inputNotified = false;
   state.consultNotified = false;
+  state.feedbackNotified = false;
+  state.feedbackText = '';
+  state.feedbackMessage = '';
   state.startNotifyPending = false;
   state.resultNotifyPending = false;
   state.eventNotifyPending = false;
@@ -128,7 +143,7 @@ function getQuantityValue(key) {
   if (!value) return 0;
   if (!AREA_KEYS.has(key)) return Number(value.quantity || 0);
   if (value.mode === 'size') return Number(value.length || 0) * Number(value.width || 0);
-  if (value.mode === 'preset') return PRESET_AREAS[value.preset]?.value || 0;
+  if (value.mode === 'preset') return getPresetForKey(key, value.preset)?.value || 0;
   return Number(value.quantity || 0);
 }
 
@@ -143,7 +158,7 @@ function quantityInputLabel(key) {
       return `縦${length}m × 横${width}m（約${q ? round1(q) : '-'}㎡）`;
     }
     if (value.mode === 'preset') {
-      return `${PRESET_AREAS[value.preset]?.label || '未選択'}（約${q || '-'}㎡）`;
+      return `${getPresetForKey(key, value.preset)?.label || '未選択'}（約${q || '-'}㎡）`;
     }
     return `${value.quantity || '-'}㎡`;
   }
@@ -485,18 +500,20 @@ function buildEventPayload(eventType) {
     inputSummary: currentInputSummary(),
     inputs: state.inputs,
     results,
+    feedbackText: state.feedbackText,
   };
 }
 
 async function notifyEvent(eventType) {
-  if (state.eventNotifyPending) return;
+  if (state.eventNotifyPending) return false;
   const notifiedKeyMap = {
     selection_complete: 'selectionNotified',
     input_complete: 'inputNotified',
     consult_clicked: 'consultNotified',
+    feedback_submitted: 'feedbackNotified',
   };
   const key = notifiedKeyMap[eventType];
-  if (key && state[key]) return;
+  if (key && state[key]) return false;
 
   state.eventNotifyPending = true;
   try {
@@ -506,9 +523,11 @@ async function notifyEvent(eventType) {
       body: JSON.stringify({ ...buildEventPayload(eventType), appVersion: APP_VERSION }),
     });
     const data = await response.json().catch(() => ({}));
-    if (response.ok && data.ok && key) state[key] = true;
+    if (response.ok && data.ok && key) { state[key] = true; return true; }
+    return false;
   } catch (error) {
     console.warn('event notify failed', error);
+    return false;
   } finally {
     state.eventNotifyPending = false;
   }
@@ -546,7 +565,7 @@ function validateSelectedInputs() {
           messages.push(`${label}：縦と横の両方を入力してください。分からない場合は「目安から選ぶ」をご利用ください。`);
         }
       } else if (input.mode === 'preset') {
-        if (!input.preset || !PRESET_AREAS[input.preset]) {
+        if (!input.preset || !getPresetForKey(key, input.preset)) {
           messages.push(`${label}：目安を選択してください。`);
         }
       } else if (!hasPositive(input.quantity)) {
@@ -702,7 +721,7 @@ function renderAreaInputBlock(key, meta) {
           <label>目安</label>
           <select data-key="${key}" data-name="preset">
             <option value="" ${input.preset === '' ? 'selected' : ''}>選択してください</option>
-            ${Object.entries(PRESET_AREAS).map(([presetKey, preset]) => `<option value="${presetKey}" ${input.preset === presetKey ? 'selected' : ''}>${preset.label}</option>`).join('')}
+            ${Object.entries(getPresetAreasForKey(key)).map(([presetKey, preset]) => `<option value="${presetKey}" ${input.preset === presetKey ? 'selected' : ''}>${preset.label}</option>`).join('')}
           </select>
         </div>
       </div>
@@ -911,6 +930,36 @@ function renderStep3() {
   return step;
 }
 
+
+async function submitFeedbackFromResult() {
+  const value = String(state.feedbackText || '').trim();
+  if (!value) {
+    state.feedbackMessage = '感想を入力してください。';
+    render();
+    return;
+  }
+  const ok = await notifyEvent('feedback_submitted');
+  if (ok || state.feedbackNotified) {
+    state.feedbackMessage = '感想を送信しました。ご協力ありがとうございます。';
+  } else {
+    state.feedbackMessage = '送信できませんでした。時間をおいて再度お試しください。';
+  }
+  render();
+}
+
+function getSameAreaDoubleCountWarning() {
+  if (!(state.selected.includes('turf') && state.selected.includes('weed_gravel'))) return '';
+  const turfQ = getQuantityValue('turf');
+  const weedQ = getQuantityValue('weed_gravel');
+  if (!turfQ || !weedQ) return '';
+  const diff = Math.abs(turfQ - weedQ);
+  const base = Math.max(turfQ, weedQ);
+  if (base && diff / base <= 0.1) {
+    return '<div class="notice" style="margin-top:12px"><p>人工芝と防草シート＋砕石を同じ場所で入力している場合は、二重計算になることがあります。別々の範囲なら問題ありません。</p></div>';
+  }
+  return '';
+}
+
 function renderStep4() {
   ensureSession();
   const step = createStep(4, '概算を見る');
@@ -925,6 +974,7 @@ function renderStep4() {
       <p>選択した工事の概算目安です。正式なお見積もりは現地確認後にご案内します。</p>
     </div>
     <div class="summary-meta result-meta"><span>受付番号：${state.receiptNo}</span><span>エリア：${sanitizeText(getProjectArea())}</span></div>
+    ${getSameAreaDoubleCountWarning()}
 
     <div class="result-list" style="margin-top:16px">
       ${results.items.length ? results.items.map((item) => `
@@ -952,8 +1002,32 @@ function renderStep4() {
       <p>概算シミュレーターからご相談いただいた方には、工事内容に応じて特典をご案内できる場合があります。</p>
     </div>
 
+    <div class="field-block" style="margin-top:16px">
+      <div class="field-title">
+        <h3>概算シミュレーターの感想</h3>
+        <p>使ってみた感想や、分かりにくかった点があれば教えてください。</p>
+      </div>
+      <div class="field">
+        <textarea id="feedback-text" ${state.feedbackNotified ? 'disabled' : ''} placeholder="例）分かりやすかった、項目が少し迷った など">${sanitizeText(state.feedbackText || '')}</textarea>
+        <p class="field-help">感想をご協力いただいた方には、工事内容に応じた特典をご案内できる場合があります。</p>
+        ${state.feedbackMessage ? `<p class="field-help"><strong>${sanitizeText(state.feedbackMessage)}</strong></p>` : ''}
+        <button type="button" id="feedback-submit" class="ghost" ${state.feedbackNotified ? 'disabled' : ''}>感想を送る</button>
+      </div>
+    </div>
+
     ${consultHtml}
   `);
+
+  const feedbackText = step.querySelector('#feedback-text');
+  const feedbackSubmit = step.querySelector('#feedback-submit');
+  if (feedbackText) {
+    feedbackText.addEventListener('input', (e) => {
+      state.feedbackText = e.target.value;
+      state.feedbackMessage = '';
+    });
+  }
+  if (feedbackSubmit) feedbackSubmit.addEventListener('click', submitFeedbackFromResult);
+
   setActions(step, [
     { label: 'この内容で相談する', className: 'primary', onClick: async () => { await notifyEvent('consult_clicked'); window.location.href = LINE_TALK_URL; } },
     { label: 'その他の工事も入力する', className: 'ghost', onClick: () => { state.selected = Array.from(new Set([...state.selected, 'custom_consult'])); state.step = 2; render(); } },

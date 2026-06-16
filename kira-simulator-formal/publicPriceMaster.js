@@ -19,7 +19,8 @@ const PRICE_MASTER = {
     brackets: [
       { max: 15, low: 5500, high: 7500 },
       { max: 40, low: 4800, high: 6500 },
-      { max: Infinity, low: 4300, high: 5800 },
+      { max: 80, low: 4300, high: 5800 },
+      { max: Infinity, low: 3800, high: 5200 },
     ],
     minimum: { low: 50000, high: 80000 },
   },
@@ -28,7 +29,8 @@ const PRICE_MASTER = {
     brackets: [
       { max: 15, low: 7500, high: 10000 },
       { max: 40, low: 6500, high: 8500 },
-      { max: Infinity, low: 5800, high: 7500 },
+      { max: 80, low: 5800, high: 7500 },
+      { max: Infinity, low: 4800, high: 6500 },
     ],
     minimum: { low: 70000, high: 100000 },
   },
@@ -37,7 +39,8 @@ const PRICE_MASTER = {
     brackets: [
       { max: 15, low: 9500, high: 12000 },
       { max: 40, low: 8500, high: 10500 },
-      { max: Infinity, low: 7800, high: 9500 },
+      { max: 80, low: 7800, high: 9500 },
+      { max: Infinity, low: 6800, high: 8500 },
     ],
     minimum: { low: 100000, high: 140000 },
   },
@@ -135,6 +138,17 @@ const PRESET_AREAS = {
   large: { label: '広めの駐車場・庭（約50㎡）', value: 50 },
 };
 
+// 目安選択は基本的に共通ですが、人工芝だけは「駐車場」という表現を避けます。
+const PRESET_AREAS_BY_WORK = {
+  turf: {
+    approach: { label: '小さめの庭まわり（約5㎡）', value: 5 },
+    car1: { label: '庭の一部（約15㎡）', value: 15 },
+    garden: { label: '庭の一部・ドッグラン小さめ（約20㎡）', value: 20 },
+    car2: { label: '一般的な庭まわり（約30㎡）', value: 30 },
+    large: { label: '広めの庭・ドッグランなど（約50㎡）', value: 50 },
+  },
+};
+
 const V12_LABELS = {
   tile_deck: 'タイルデッキ',
   approach: 'アプローチ・園路',
@@ -175,6 +189,7 @@ const GATE_POST_TYPES = {
     AREA_KEYS: AREA_KEYS,
     QUANTITY_KEYS: QUANTITY_KEYS,
     PRESET_AREAS: PRESET_AREAS,
+    PRESET_AREAS_BY_WORK: PRESET_AREAS_BY_WORK,
     V12_LABELS: V12_LABELS,
     RETAINING_TYPES: RETAINING_TYPES,
     RETAINING_HEIGHTS: RETAINING_HEIGHTS,
