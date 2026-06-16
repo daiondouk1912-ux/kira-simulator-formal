@@ -984,7 +984,7 @@ function renderStep4() {
           <div class="detail">
             ${item.inputText ? `入力内容：${item.inputText}` : item.quantity ? `入力数量：${item.quantity}${item.unit}` : '定額レンジ'}
             ${(item.rule === 'minimum' || item.rule === 'small_adjust') ? ' ／ 小規模のため最低施工金額を反映' : ''}
-            ${(item.rule === 'minimum' || item.rule === 'small_adjust') ? '<br>※ 現地確認後に金額を調整できる場合があります。' : ''}
+            ${(item.rule === 'minimum' || item.rule === 'small_adjust') ? '<br><span class="adjust-note">※ 現地確認後に金額を調整できる場合があります。</span>' : ''}
             ${item.note ? `<br>※ ${sanitizeText(item.note)}` : ''}
           </div>
         </div>
@@ -994,7 +994,7 @@ function renderStep4() {
     <div class="result-total">
       <div class="muted">合計の概算目安</div>
       <div class="price">${results.items.length ? formatRange(results.totalLow, results.totalHigh) : '-'}</div>
-      <p class="small">※ 合計は参考表示です。主役は上の工事項目別表示です。</p>
+      <p class="small estimate-note">※ 表示金額は概算の目安です。正式なお見積もりは現地確認後にご案内します。</p>
     </div>
 
     <div class="benefit-note">
