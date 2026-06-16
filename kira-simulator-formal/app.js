@@ -1,4 +1,4 @@
-// v13.2: 人工芝文言調整 + 感想欄追加
+// v13.6: LINE保存ボタン追加 + 人工芝文言調整 + 感想欄追加
 // 計算に使う公開用レンジは publicPriceMaster.js から読み込みます。
 // 原価・人工原価・利益率などの内部情報は、このお客さま用アプリには入れません。
 const {
@@ -36,6 +36,7 @@ const state = {
   inputNotified: false,
   consultNotified: false,
   feedbackNotified: false,
+  lineSaveNotified: false,
   feedbackText: '',
   feedbackMessage: '',
   selected: [],
@@ -70,7 +71,7 @@ const app = document.getElementById('app');
 const STEP_LABELS = ['スタート', '工事を選ぶ', '内容を入力', '内容を確認', '概算を見る'];
 const LINE_TALK_URL = 'https://line.me/R/oaMessage/%40963rsnpu';
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
-const APP_VERSION = 'v13.3-large-area-price-adjust';
+const APP_VERSION = 'v13.6-line-save-result';
 
 function fnUrl(name) {
   return `${window.location.origin}/.netlify/functions/${name}`;
@@ -80,6 +81,17 @@ function yen(value) {
   return new Intl.NumberFormat('ja-JP', { style: 'currency', currency: 'JPY', maximumFractionDigits: 0 }).format(value);
 }
 function formatRange(low, high) { return `${yen(low)} 〜 ${yen(high)}`; }
+function compactLines(values = [], maxItems = 8) {
+  const items = values.filter(Boolean);
+  if (!items.length) return 'なし';
+  const shown = items.slice(0, maxItems).map((value) => `・${value}`);
+  if (items.length > maxItems) shown.push(`・ほか${items.length - maxItems}件`);
+  return shown.join('\n');
+}
+function limitPlainText(value, max = 1800) {
+  const text = String(value || '');
+  return text.length > max ? `${text.slice(0, max)}\n…一部省略しました` : text;
+}
 function getBracket(def, q) { return def.brackets.find((b) => q <= b.max) || def.brackets[def.brackets.length - 1]; }
 function sanitizeText(value) { return String(value || '').replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#039;' }[c])); }
 
@@ -105,6 +117,7 @@ function resetNotifyFlags() {
   state.inputNotified = false;
   state.consultNotified = false;
   state.feedbackNotified = false;
+  state.lineSaveNotified = false;
   state.feedbackText = '';
   state.feedbackMessage = '';
   state.startNotifyPending = false;
@@ -511,6 +524,7 @@ async function notifyEvent(eventType) {
     input_complete: 'inputNotified',
     consult_clicked: 'consultNotified',
     feedback_submitted: 'feedbackNotified',
+    line_save_clicked: 'lineSaveNotified',
   };
   const key = notifiedKeyMap[eventType];
   if (key && state[key]) return false;
@@ -547,6 +561,38 @@ function buildResultPayload() {
     inputs: state.inputs,
     results,
   };
+}
+
+function buildLineSaveText() {
+  const results = computeResults();
+  ensureSession();
+  const selected = selectedLabels();
+  const inputSummary = currentInputSummary();
+  const text = [
+    '【KirA 概算シミュレーター結果】',
+    `受付番号：${state.receiptNo}`,
+    `エリア：${getProjectArea()}`,
+    `概算：${results.items.length ? formatRange(results.totalLow, results.totalHigh) : '-'}`,
+    '',
+    '項目：',
+    compactLines(selected, 10),
+    '',
+    '入力内容：',
+    compactLines(inputSummary, 10),
+    '',
+    '※ 表示金額は概算の目安です。正式なお見積もりは現地確認後にご案内します。',
+    '※ LINEに送信しておくと、あとから見返しやすくなります。',
+  ].join('\n');
+  return limitPlainText(text, 1800);
+}
+
+function buildLineSaveUrl() {
+  return `${LINE_TALK_URL}/?${encodeURIComponent(buildLineSaveText())}`;
+}
+
+async function openLineSaveResult() {
+  await notifyEvent('line_save_clicked');
+  window.location.href = buildLineSaveUrl();
 }
 
 
@@ -1002,10 +1048,15 @@ function renderStep4() {
       <p>概算シミュレーターからご相談いただいた方には、工事内容に応じて特典をご案内できる場合があります。</p>
     </div>
 
+    <div class="line-save-note">
+      <strong>概算結果を残したい方へ</strong>
+      <p>「LINEに送って保存」を押すと、この概算結果がLINEに入力されます。LINEが開いたら、そのまま送信しておくとあとから見返しやすくなります。</p>
+    </div>
+
     <div class="field-block" style="margin-top:16px">
       <div class="field-title">
         <h3>概算シミュレーターの感想</h3>
-        <p>使ってみた感想や、分かりにくかった点があれば教えてください。</p>
+        <p>まだ相談前の段階でも大丈夫です。使ってみた感想や、分かりにくかった点があれば教えてください。</p>
       </div>
       <div class="field">
         <textarea id="feedback-text" ${state.feedbackNotified ? 'disabled' : ''} placeholder="例）分かりやすかった、項目が少し迷った など">${sanitizeText(state.feedbackText || '')}</textarea>
@@ -1029,7 +1080,8 @@ function renderStep4() {
   if (feedbackSubmit) feedbackSubmit.addEventListener('click', submitFeedbackFromResult);
 
   setActions(step, [
-    { label: 'この内容で相談する', className: 'primary', onClick: async () => { await notifyEvent('consult_clicked'); window.location.href = LINE_TALK_URL; } },
+    { label: 'この概算をLINEに送って保存する', className: 'primary', onClick: openLineSaveResult },
+    { label: 'この概算について質問する', className: 'secondary', onClick: async () => { await notifyEvent('consult_clicked'); window.location.href = LINE_TALK_URL; } },
     { label: 'その他の工事も入力する', className: 'ghost', onClick: () => { state.selected = Array.from(new Set([...state.selected, 'custom_consult'])); state.step = 2; render(); } },
     { label: 'もう一度はじめから入力する', className: 'secondary', onClick: () => { window.location.reload(); } },
   ]);

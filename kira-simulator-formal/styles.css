@@ -280,3 +280,24 @@ button:disabled { opacity: .55; cursor: not-allowed; }
   color: var(--muted);
   font-size: 13px;
 }
+
+/* v13.6: 概算結果をLINEに送って保存する案内 */
+.benefit-note, .line-save-note {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: #fbfcfb;
+}
+.benefit-note strong, .line-save-note strong {
+  display: block;
+  margin-bottom: 4px;
+}
+.benefit-note p, .line-save-note p {
+  margin-bottom: 0;
+  color: var(--muted);
+}
+.line-save-note {
+  background: #f7fbff;
+  border-color: #cfe2f3;
+}
