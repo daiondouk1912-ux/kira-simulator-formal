@@ -39,8 +39,9 @@ function resultPrice(results = {}) {
 function eventTitle(eventType) {
   if (eventType === 'selection_complete') return '工事項目が選択されました';
   if (eventType === 'input_complete') return '内容入力が完了しました';
-  if (eventType === 'consult_clicked') return '相談ボタンが押されました';
+  if (eventType === 'consult_clicked') return '質問ボタンが押されました';
   if (eventType === 'feedback_submitted') return '概算シミュレーターの感想が届きました';
+  if (eventType === 'line_save_clicked') return '概算結果のLINE保存ボタンが押されました';
   return '概算シミュレーターの操作がありました';
 }
 
@@ -66,6 +67,10 @@ function extraLines(body) {
     lines.push(`・項目: ${selected}`);
     lines.push(`・概算: ${resultPrice(results)}`);
     lines.push(`・感想: ${limitText(body.feedbackText || '未入力', 1200)}`);
+  } else if (eventType === 'line_save_clicked') {
+    lines.push(`・項目: ${selected}`);
+    lines.push(`・条件: ${inputSummary}`);
+    lines.push(`・概算: ${resultPrice(results)}`);
   } else {
     lines.push(`・項目: ${selected}`);
   }
