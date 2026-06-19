@@ -1,4 +1,4 @@
-// v13.6: LINE保存ボタン追加 + 人工芝文言調整 + 感想欄追加
+// v13.7: 統計イベント土台 + 費用検索向け文言 + 導線整理
 // 計算に使う公開用レンジは publicPriceMaster.js から読み込みます。
 // 原価・人工原価・利益率などの内部情報は、このお客さま用アプリには入れません。
 const {
@@ -71,7 +71,8 @@ const app = document.getElementById('app');
 const STEP_LABELS = ['スタート', '工事を選ぶ', '内容を入力', '内容を確認', '概算を見る'];
 const LINE_TALK_URL = 'https://line.me/R/oaMessage/%40963rsnpu';
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
-const APP_VERSION = 'v13.6-line-save-result';
+const APP_VERSION = 'v13.7-stats-seo-flow';
+const GA_MEASUREMENT_ID = (window.KIRA_GA_MEASUREMENT_ID || '').trim();
 
 function fnUrl(name) {
   return `${window.location.origin}/.netlify/functions/${name}`;
@@ -94,6 +95,46 @@ function limitPlainText(value, max = 1800) {
 }
 function getBracket(def, q) { return def.brackets.find((b) => q <= b.max) || def.brackets[def.brackets.length - 1]; }
 function sanitizeText(value) { return String(value || '').replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#039;' }[c])); }
+
+function initAnalytics() {
+  window.dataLayer = window.dataLayer || [];
+  if (!GA_MEASUREMENT_ID || window.__KIRA_GA_LOADED__) return;
+  window.__KIRA_GA_LOADED__ = true;
+  const script = document.createElement('script');
+  script.async = true;
+  script.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(GA_MEASUREMENT_ID)}`;
+  document.head.appendChild(script);
+  window.gtag = window.gtag || function gtag(){ window.dataLayer.push(arguments); };
+  window.gtag('js', new Date());
+  window.gtag('config', GA_MEASUREMENT_ID, {
+    app_name: 'kira_exterior_simulator',
+    app_version: APP_VERSION,
+  });
+}
+
+function trackStat(eventName, params = {}) {
+  ensureSession();
+  const results = computeResults();
+  const payload = {
+    app_version: APP_VERSION,
+    receipt_no: state.receiptNo || '',
+    project_area: getProjectArea(),
+    step: state.step,
+    selected_count: state.selected.length,
+    selected_labels: selectedLabels().join('|'),
+    total_low: Math.round(results.totalLow || 0),
+    total_high: Math.round(results.totalHigh || 0),
+    has_result: results.items.length > 0,
+    ...params,
+  };
+  window.dataLayer = window.dataLayer || [];
+  window.dataLayer.push({ event: eventName, ...payload });
+  if (typeof window.gtag === 'function') window.gtag('event', eventName, payload);
+  if (new URLSearchParams(window.location.search).has('debugStats')) {
+    console.log('[KirA stats]', eventName, payload);
+  }
+}
+
 
 function getPresetAreasForKey(key) {
   return (PRESET_AREAS_BY_WORK && PRESET_AREAS_BY_WORK[key]) ? PRESET_AREAS_BY_WORK[key] : PRESET_AREAS;
@@ -419,6 +460,7 @@ function progressPills(activeIndex) {
 
 async function notifyStart() {
   if (state.startedNotified || state.startNotifyPending) return;
+  trackStat('sim_start');
   state.startNotifyPending = true;
   state.startedAt = state.startedAt || new Date().toISOString();
   ensureSession();
@@ -446,6 +488,7 @@ async function notifyStart() {
 
 async function notifyResult(payload) {
   if (state.resultNotified || state.resultNotifyPending) return;
+  trackStat('sim_result_view', { item_count: payload?.results?.items?.length || 0 });
   state.resultNotifyPending = true;
   try {
     const response = await fetch(fnUrl('notify-result'), {
@@ -518,6 +561,13 @@ function buildEventPayload(eventType) {
 }
 
 async function notifyEvent(eventType) {
+  const statNameMap = {
+    selection_complete: 'sim_selection_complete',
+    input_complete: 'sim_input_complete',
+    consult_clicked: 'sim_consult_click',
+    feedback_submitted: 'sim_feedback_submit',
+    line_save_clicked: 'sim_line_save_click',
+  };
   if (state.eventNotifyPending) return false;
   const notifiedKeyMap = {
     selection_complete: 'selectionNotified',
@@ -528,6 +578,7 @@ async function notifyEvent(eventType) {
   };
   const key = notifiedKeyMap[eventType];
   if (key && state[key]) return false;
+  if (statNameMap[eventType]) trackStat(statNameMap[eventType]);
 
   state.eventNotifyPending = true;
   try {
@@ -670,11 +721,11 @@ function renderStep0() {
     ${state.sessionMessage ? `<div class="session-notice">${sanitizeText(state.sessionMessage)}</div>` : ''}
     <div class="grid">
       <div class="notice">
-        <p>駐車場のコンクリート、フェンス、人工芝、カーポートなど、気になる工事の概算目安をご確認いただけます。まずは工事を選んで進んでください。</p>
+        <p>いわき市周辺でご相談の多い外構工事の費用目安を確認できます。土間コンクリート、フェンス、人工芝、防草対策、カーポートなど、気になる工事を選んで進んでください。</p>
       </div>
-      <div class="benefit-note intro-benefit">
-        <strong>シミュレーター利用後のご相談特典</strong>
-        <p>概算シミュレーターをご利用後にご相談いただいた方には、工事内容に応じて特典をご案内できる場合があります。</p>
+      <div class="benefit-note intro-benefit compact-benefit">
+        <strong>相談前の費用確認だけでもOK</strong>
+        <p>結果はLINEに送って保存できます。正式なお見積もりは、現地確認後にご案内します。</p>
       </div>
       <div class="area-start-box">
         <label for="project-area">施工予定地のエリア（任意）</label>
@@ -894,7 +945,7 @@ function renderStep2() {
         <div class="field">
           <label>その他の工事内容</label>
           <textarea data-key="custom_consult" data-name="note" placeholder="例）門柱のやり替え、階段補修、土留め、サンルーム、ガレージなど">${sanitizeText(state.inputs.custom_consult.note || '')}</textarea>
-          <p class="field-help">入力内容は、結果画面でまとめて確認できます。詳しく相談したい場合は、最後の「この内容で相談する」からLINEへお進みください。</p>
+          <p class="field-help">入力内容は、結果画面でまとめて確認できます。詳しく確認したい場合は、最後の「この概算について質問する」からLINEへお進みください。</p>
         </div>
       `));
     }
@@ -1017,7 +1068,7 @@ function renderStep4() {
   setBody(step, `
     ${progressPills(4)}
     <div class="notice">
-      <p>選択した工事の概算目安です。正式なお見積もりは現地確認後にご案内します。</p>
+      <p>いわき市周辺の外構工事費用の概算目安です。正式なお見積もりは現地確認後にご案内します。</p>
     </div>
     <div class="summary-meta result-meta"><span>受付番号：${state.receiptNo}</span><span>エリア：${sanitizeText(getProjectArea())}</span></div>
     ${getSameAreaDoubleCountWarning()}
@@ -1043,9 +1094,9 @@ function renderStep4() {
       <p class="small estimate-note">※ 表示金額は概算の目安です。正式なお見積もりは現地確認後にご案内します。</p>
     </div>
 
-    <div class="benefit-note">
-      <strong>シミュレーターからのご相談特典</strong>
-      <p>概算シミュレーターからご相談いただいた方には、工事内容に応じて特典をご案内できる場合があります。</p>
+    <div class="benefit-note compact-benefit">
+      <strong>相談前の費用確認にも使えます</strong>
+      <p>シミュレーター利用後のご相談は、工事内容に応じて特典をご案内できる場合があります。</p>
     </div>
 
     <div class="line-save-note">
@@ -1055,12 +1106,12 @@ function renderStep4() {
 
     <div class="field-block" style="margin-top:16px">
       <div class="field-title">
-        <h3>概算シミュレーターの感想</h3>
-        <p>まだ相談前の段階でも大丈夫です。使ってみた感想や、分かりにくかった点があれば教えてください。</p>
+        <h3>使ってみた感想を送る</h3>
+        <p>分かりにくかった点や、あったら便利だと思う内容があれば教えてください。</p>
       </div>
       <div class="field">
         <textarea id="feedback-text" ${state.feedbackNotified ? 'disabled' : ''} placeholder="例）分かりやすかった、項目が少し迷った など">${sanitizeText(state.feedbackText || '')}</textarea>
-        <p class="field-help">感想をご協力いただいた方には、工事内容に応じた特典をご案内できる場合があります。</p>
+        <p class="field-help">まだ相談前の段階でも大丈夫です。</p>
         ${state.feedbackMessage ? `<p class="field-help"><strong>${sanitizeText(state.feedbackMessage)}</strong></p>` : ''}
         <button type="button" id="feedback-submit" class="ghost" ${state.feedbackNotified ? 'disabled' : ''}>感想を送る</button>
       </div>
@@ -1082,8 +1133,8 @@ function renderStep4() {
   setActions(step, [
     { label: 'この概算をLINEに送って保存する', className: 'primary', onClick: openLineSaveResult },
     { label: 'この概算について質問する', className: 'secondary', onClick: async () => { await notifyEvent('consult_clicked'); window.location.href = LINE_TALK_URL; } },
-    { label: 'その他の工事も入力する', className: 'ghost', onClick: () => { state.selected = Array.from(new Set([...state.selected, 'custom_consult'])); state.step = 2; render(); } },
-    { label: 'もう一度はじめから入力する', className: 'secondary', onClick: () => { window.location.reload(); } },
+    { label: 'その他の工事も入力する', className: 'ghost', onClick: () => { trackStat('sim_other_work_add_click'); state.selected = Array.from(new Set([...state.selected, 'custom_consult'])); state.step = 2; render(); } },
+    { label: 'もう一度はじめから入力する', className: 'ghost', onClick: () => { trackStat('sim_restart_click'); window.location.reload(); } },
   ]);
   return step;
 }
@@ -1102,4 +1153,5 @@ function render() {
   }
 }
 
+initAnalytics();
 render();

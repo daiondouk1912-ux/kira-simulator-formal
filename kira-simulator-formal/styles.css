@@ -301,3 +301,14 @@ button:disabled { opacity: .55; cursor: not-allowed; }
   background: #f7fbff;
   border-color: #cfe2f3;
 }
+
+/* v13.7: 費用検索向け表示・結果画面導線整理 */
+.sp-only { display: none; }
+.compact-benefit p { font-size: 14px; }
+.step-actions button.primary:first-child {
+  box-shadow: 0 8px 18px rgba(47, 111, 70, 0.18);
+}
+@media (max-width: 760px) {
+  .sp-only { display: block; }
+  .hero-features > div { padding: 12px; }
+}
