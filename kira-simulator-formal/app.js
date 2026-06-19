@@ -1,4 +1,4 @@
-// v13.7: 統計イベント土台 + 費用検索向け文言 + 導線整理
+// v13.8: 行動分析強化（滞在時間・入力項目数・問い合わせ押下通知） + v13.7の導線整理
 // 計算に使う公開用レンジは publicPriceMaster.js から読み込みます。
 // 原価・人工原価・利益率などの内部情報は、このお客さま用アプリには入れません。
 const {
@@ -71,7 +71,7 @@ const app = document.getElementById('app');
 const STEP_LABELS = ['スタート', '工事を選ぶ', '内容を入力', '内容を確認', '概算を見る'];
 const LINE_TALK_URL = 'https://line.me/R/oaMessage/%40963rsnpu';
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
-const APP_VERSION = 'v13.7-stats-seo-flow';
+const APP_VERSION = 'v13.8-action-analysis';
 const GA_MEASUREMENT_ID = (window.KIRA_GA_MEASUREMENT_ID || '').trim();
 
 function fnUrl(name) {
@@ -95,6 +95,16 @@ function limitPlainText(value, max = 1800) {
 }
 function getBracket(def, q) { return def.brackets.find((b) => q <= b.max) || def.brackets[def.brackets.length - 1]; }
 function sanitizeText(value) { return String(value || '').replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#039;' }[c])); }
+
+function getElapsedMs() {
+  const base = state.sessionCreatedAt || (state.startedAt ? new Date(state.startedAt).getTime() : 0);
+  if (!base) return 0;
+  return Math.max(0, Date.now() - base);
+}
+
+function getInputItemCount() {
+  return state.selected.length;
+}
 
 function initAnalytics() {
   window.dataLayer = window.dataLayer || [];
@@ -121,6 +131,8 @@ function trackStat(eventName, params = {}) {
     project_area: getProjectArea(),
     step: state.step,
     selected_count: state.selected.length,
+    input_item_count: getInputItemCount(),
+    elapsed_seconds: Math.round(getElapsedMs() / 1000),
     selected_labels: selectedLabels().join('|'),
     total_low: Math.round(results.totalLow || 0),
     total_high: Math.round(results.totalHigh || 0),
@@ -488,7 +500,11 @@ async function notifyStart() {
 
 async function notifyResult(payload) {
   if (state.resultNotified || state.resultNotifyPending) return;
-  trackStat('sim_result_view', { item_count: payload?.results?.items?.length || 0 });
+  trackStat('sim_result_view', {
+    item_count: payload?.results?.items?.length || 0,
+    input_item_count: payload?.inputItemCount || getInputItemCount(),
+    elapsed_seconds: Math.round((payload?.elapsedMs || getElapsedMs()) / 1000),
+  });
   state.resultNotifyPending = true;
   try {
     const response = await fetch(fnUrl('notify-result'), {
@@ -550,6 +566,9 @@ function buildEventPayload(eventType) {
     eventAt: new Date().toISOString(),
     sessionId: state.sessionId,
     receiptNo: state.receiptNo,
+    startedAt: state.startedAt,
+    elapsedMs: getElapsedMs(),
+    inputItemCount: getInputItemCount(),
     projectArea: getProjectArea(),
     selected: state.selected,
     selectedLabels: selectedLabels(),
@@ -606,6 +625,9 @@ function buildResultPayload() {
     displayedAt: new Date().toISOString(),
     sessionId: state.sessionId,
     receiptNo: state.receiptNo,
+    startedAt: state.startedAt,
+    elapsedMs: getElapsedMs(),
+    inputItemCount: getInputItemCount(),
     projectArea: getProjectArea(),
     startedAt: state.startedAt,
     selected: state.selected,
