@@ -14,9 +14,21 @@ function jstTime(value) {
   }).format(date);
 }
 
+function uniqueItems(values = []) {
+  return Array.from(new Set((values || []).filter(Boolean)));
+}
+
 function compactList(values = []) {
-  const items = values.filter(Boolean);
-  return items.length ? Array.from(new Set(items)).join('、') : 'なし';
+  const items = uniqueItems(values);
+  return items.length ? items.join('、') : 'なし';
+}
+
+function bulletList(values = [], maxItems = 8) {
+  const items = uniqueItems(values);
+  if (!items.length) return 'なし';
+  const shown = items.slice(0, maxItems).map((item) => `・${item}`);
+  if (items.length > maxItems) shown.push(`・ほか${items.length - maxItems}件`);
+  return shown.join('\n');
 }
 
 function limitText(value, max = 900) {
@@ -48,31 +60,31 @@ function eventTitle(eventType) {
 function extraLines(body) {
   const eventType = body.eventType;
   const lines = [];
-  const selected = limitText(compactList(body.selectedLabels || []));
-  const inputSummary = limitText(compactList(body.inputSummary || []));
+  const selected = limitText(bulletList(body.selectedLabels || []));
+  const inputSummary = limitText(bulletList(body.inputSummary || []));
   const results = body.results || {};
 
   if (eventType === 'selection_complete') {
-    lines.push(`・選択項目: ${selected}`);
+    lines.push('・選択項目:\n' + selected);
   } else if (eventType === 'input_complete') {
-    lines.push(`・項目: ${selected}`);
-    lines.push(`・入力内容: ${inputSummary}`);
+    lines.push('・項目:\n' + selected);
+    lines.push('・入力内容:\n' + inputSummary);
     const custom = body.inputs?.custom_consult?.note;
-    if (custom) lines.push(`・その他入力: ${custom}`);
+    if (custom) lines.push(`・その他入力: ${limitText(custom, 500)}`);
   } else if (eventType === 'consult_clicked') {
-    lines.push(`・項目: ${selected}`);
-    lines.push(`・条件: ${inputSummary}`);
+    lines.push('・項目:\n' + selected);
+    lines.push('・入力内容:\n' + inputSummary);
     lines.push(`・概算: ${resultPrice(results)}`);
   } else if (eventType === 'feedback_submitted') {
-    lines.push(`・項目: ${selected}`);
+    lines.push('・項目:\n' + selected);
     lines.push(`・概算: ${resultPrice(results)}`);
     lines.push(`・感想: ${limitText(body.feedbackText || '未入力', 1200)}`);
   } else if (eventType === 'line_save_clicked') {
-    lines.push(`・項目: ${selected}`);
-    lines.push(`・条件: ${inputSummary}`);
+    lines.push('・項目:\n' + selected);
+    lines.push('・入力内容:\n' + inputSummary);
     lines.push(`・概算: ${resultPrice(results)}`);
   } else {
-    lines.push(`・項目: ${selected}`);
+    lines.push('・項目:\n' + selected);
   }
 
   return lines;

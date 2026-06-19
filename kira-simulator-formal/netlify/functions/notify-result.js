@@ -14,9 +14,21 @@ function jstTime(value) {
   }).format(date);
 }
 
+function uniqueItems(values = []) {
+  return Array.from(new Set((values || []).filter(Boolean)));
+}
+
 function compactList(values = []) {
-  const items = values.filter(Boolean);
-  return items.length ? Array.from(new Set(items)).join('、') : 'なし';
+  const items = uniqueItems(values);
+  return items.length ? items.join('、') : 'なし';
+}
+
+function bulletList(values = [], maxItems = 10) {
+  const items = uniqueItems(values);
+  if (!items.length) return 'なし';
+  const shown = items.slice(0, maxItems).map((item) => `・${item}`);
+  if (items.length > maxItems) shown.push(`・ほか${items.length - maxItems}件`);
+  return shown.join('\n');
 }
 
 function limitText(value, max = 1000) {
@@ -32,7 +44,7 @@ function trimMessage(text, max = 4500) {
 function selectedItemsText(selected = [], results = {}) {
   const itemLabels = (results.items || []).map((item) => item.label);
   const consult = (results.consult || []).filter(Boolean);
-  return compactList([...itemLabels, ...consult]);
+  return bulletList([...itemLabels, ...consult]);
 }
 
 function inputValuesText(results = {}) {
@@ -42,7 +54,7 @@ function inputValuesText(results = {}) {
     return `${item.label}: ${input}`;
   });
   const consult = (results.consult || []).filter(Boolean).map((item) => `相談: ${item}`);
-  return compactList([...parts, ...consult]);
+  return bulletList([...parts, ...consult]);
 }
 
 exports.handler = async (event) => {
@@ -65,8 +77,8 @@ exports.handler = async (event) => {
     '概算シミュレーター結果が表示されました',
     `・受付番号: ${receiptNo}`,
     `・エリア: ${projectArea}`,
-    `・項目: ${limitText(selectedItemsText(selected, results))}`,
-    `・条件: ${limitText(inputValuesText(results))}`,
+    `・項目:\n${limitText(selectedItemsText(selected, results))}`,
+    `・入力内容:\n${limitText(inputValuesText(results))}`,
     `・概算: ${estimatedPrice}`,
     `・時間: ${time}`,
   ].join('\n'));
