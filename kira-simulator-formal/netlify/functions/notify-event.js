@@ -14,6 +14,22 @@ function jstTime(value) {
   }).format(date);
 }
 
+function durationText(ms) {
+  const totalSeconds = Math.max(0, Math.round(Number(ms || 0) / 1000));
+  if (!totalSeconds) return '-';
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours) return `${hours}時間${minutes}分${seconds}秒`;
+  if (minutes) return `${minutes}分${seconds}秒`;
+  return `${seconds}秒`;
+}
+
+function inputItemCountText(value) {
+  const count = Number(value || 0);
+  return count > 0 ? `${count}項目` : '-';
+}
+
 function uniqueItems(values = []) {
   return Array.from(new Set((values || []).filter(Boolean)));
 }
@@ -51,7 +67,7 @@ function resultPrice(results = {}) {
 function eventTitle(eventType) {
   if (eventType === 'selection_complete') return '工事項目が選択されました';
   if (eventType === 'input_complete') return '内容入力が完了しました';
-  if (eventType === 'consult_clicked') return '質問ボタンが押されました';
+  if (eventType === 'consult_clicked') return '問い合わせ（質問）ボタンが押されました';
   if (eventType === 'feedback_submitted') return '概算シミュレーターの感想が届きました';
   if (eventType === 'line_save_clicked') return '概算結果のLINE保存ボタンが押されました';
   return '概算シミュレーターの操作がありました';
@@ -103,6 +119,8 @@ exports.handler = async (event) => {
     eventTitle(body.eventType),
     `・受付番号: ${body.receiptNo || '-'}`,
     `・エリア: ${body.projectArea || '未入力'}`,
+    `・入力項目数: ${inputItemCountText(body.inputItemCount)}`,
+    `・滞在時間: ${durationText(body.elapsedMs)}`,
     ...extraLines(body),
     `・時間: ${jstTime(body.eventAt || new Date().toISOString())}`,
   ].join('\n'));

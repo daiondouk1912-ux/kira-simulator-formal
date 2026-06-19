@@ -14,6 +14,22 @@ function jstTime(value) {
   }).format(date);
 }
 
+function durationText(ms) {
+  const totalSeconds = Math.max(0, Math.round(Number(ms || 0) / 1000));
+  if (!totalSeconds) return '-';
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours) return `${hours}時間${minutes}分${seconds}秒`;
+  if (minutes) return `${minutes}分${seconds}秒`;
+  return `${seconds}秒`;
+}
+
+function inputItemCountText(value) {
+  const count = Number(value || 0);
+  return count > 0 ? `${count}項目` : '-';
+}
+
 function uniqueItems(values = []) {
   return Array.from(new Set((values || []).filter(Boolean)));
 }
@@ -72,11 +88,15 @@ exports.handler = async (event) => {
   const projectArea = body.projectArea || '未入力';
   const selected = body.selected || [];
   const estimatedPrice = `${yen(results.totalLow)}〜${yen(results.totalHigh)}`;
+  const inputItemCount = body.inputItemCount || selected.length || 0;
+  const elapsedMs = body.elapsedMs || 0;
 
   const text = trimMessage([
     '概算シミュレーター結果が表示されました',
     `・受付番号: ${receiptNo}`,
     `・エリア: ${projectArea}`,
+    `・入力項目数: ${inputItemCountText(inputItemCount)}`,
+    `・滞在時間: ${durationText(elapsedMs)}`,
     `・項目:\n${limitText(selectedItemsText(selected, results))}`,
     `・入力内容:\n${limitText(inputValuesText(results))}`,
     `・概算: ${estimatedPrice}`,
