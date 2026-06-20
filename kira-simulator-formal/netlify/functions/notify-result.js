@@ -50,6 +50,31 @@ const PRESET_AREAS = {
   large: '広めの駐車場・庭（約50㎡）',
 };
 
+const PRIVACY_FENCE_HEIGHTS = {
+  h1000: 'H800〜H1000程度',
+  h1200: 'H1200程度',
+  h1600: 'H1600程度',
+  h1800: 'H1800程度',
+  h1800plus: 'H1800超・高めの目隠し',
+};
+
+const PRIVACY_FENCE_METHODS = {
+  block_existing: '既存ブロック上に取り付け',
+  block_new: 'ブロック追加・新設して取り付け',
+  independent: '独立基礎で柱を建てる',
+  unknown: 'まだ分からない',
+};
+
+function privacyFenceInputText(val = {}) {
+  const length = safeShort(val.length || val.quantity || '-');
+  const height = PRIVACY_FENCE_HEIGHTS[val.height] || PRIVACY_FENCE_HEIGHTS.h1200;
+  const method = ['h1600', 'h1800', 'h1800plus'].includes(val.height)
+    ? `${PRIVACY_FENCE_METHODS.independent}（H1200超のため）`
+    : (PRIVACY_FENCE_METHODS[val.method] || PRIVACY_FENCE_METHODS.block_existing);
+  return `目隠しフェンス: 長さ=${length}m / 高さ=${height} / 取付方法=${method}`;
+}
+
+
 function yen(value) {
   return new Intl.NumberFormat('ja-JP', { style: 'currency', currency: 'JPY', maximumFractionDigits: 0 }).format(safeNumber(value));
 }
@@ -110,6 +135,8 @@ function inputValuesText(selected = [], inputs = {}) {
     } else if (key === 'fence_mesh') {
       const methodMap = { new: '通常新設', core: '既存ブロック上', block_add: 'ブロック1段追加' };
       parts.push(`メッシュフェンス: 設置方法=${methodMap[val.method] || '-'} / 長さ=${safeShort(val.length)}m`);
+    } else if (key === 'privacy_fence') {
+      parts.push(privacyFenceInputText(val));
     } else if (key === 'carport') {
       parts.push(`カーポート: ${safeShort(val.size)}台用`);
     } else if (key === 'custom_consult') {
