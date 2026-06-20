@@ -1,12 +1,62 @@
-const { pushText, json } = require('./_line');
+'use strict';
+
+const { pushText } = require('./_line');
+const {
+  jsonResponse,
+  safeError,
+  validateCommonRequest,
+  stripDangerousText,
+  safeShort,
+  safeNumber,
+  safeInteger,
+  normalizeReceiptNo,
+  normalizeProjectArea,
+  sanitizeDeep,
+  safeLineText,
+  dedupe,
+  getEnvTargetUserId,
+} = require('./_security');
+
+const LABELS = {
+  concrete: '土間コンクリート',
+  gravel: '砕石敷き',
+  weed_gravel: '防草シート＋砕石敷き',
+  turf: '人工芝',
+  fence_mesh: 'メッシュフェンス',
+  privacy_fence: '目隠しフェンス',
+  block_add: 'ブロック1段追加',
+  block_new: 'ブロック新設（ベースから）',
+  carport: 'カーポート',
+  concrete_break: 'コンクリート解体',
+  block_break_top: 'ブロック解体（上だけ）',
+  block_break_base: 'ブロック解体（ベースごと）',
+  fence_remove: 'フェンス撤去',
+  tile_deck: 'タイルデッキ',
+  approach: 'アプローチ・園路',
+  stone_approach: 'タイル・石貼り系アプローチ',
+  retaining_wall: '土留め・高低差調整',
+  edging: '見切り材・境界処理',
+  lighting: '照明・ライトアップ',
+  drainage_adjust: '排水・桝まわり調整',
+  gate_post: '門柱・ポストまわり',
+  custom_consult: 'その他の工事・気になる内容',
+};
+
+const PRESET_AREAS = {
+  approach: 'アプローチ程度（約5㎡）',
+  car1: '車1台分程度（約15㎡）',
+  car2: '車2台分程度（約30㎡）',
+  garden: '庭の一部（約20㎡）',
+  large: '広めの駐車場・庭（約50㎡）',
+};
 
 function yen(value) {
-  return new Intl.NumberFormat('ja-JP', { style: 'currency', currency: 'JPY', maximumFractionDigits: 0 }).format(value || 0);
+  return new Intl.NumberFormat('ja-JP', { style: 'currency', currency: 'JPY', maximumFractionDigits: 0 }).format(safeNumber(value));
 }
 
 function jstTime(value) {
   const date = value ? new Date(value) : new Date();
-  if (Number.isNaN(date.getTime())) return value || '-';
+  if (Number.isNaN(date.getTime())) return '-';
   return new Intl.DateTimeFormat('ja-JP', {
     timeZone: 'Asia/Tokyo',
     year: 'numeric', month: '2-digit', day: '2-digit',
@@ -14,99 +64,108 @@ function jstTime(value) {
   }).format(date);
 }
 
-function durationText(ms) {
-  const totalSeconds = Math.max(0, Math.round(Number(ms || 0) / 1000));
-  if (!totalSeconds) return '-';
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours) return `${hours}時間${minutes}分${seconds}秒`;
-  if (minutes) return `${minutes}分${seconds}秒`;
-  return `${seconds}秒`;
-}
-
-function inputItemCountText(value) {
-  const count = Number(value || 0);
-  return count > 0 ? `${count}項目` : '-';
-}
-
-function uniqueItems(values = []) {
-  return Array.from(new Set((values || []).filter(Boolean)));
-}
-
-function compactList(values = []) {
-  const items = uniqueItems(values);
-  return items.length ? items.join('、') : 'なし';
-}
-
-function bulletList(values = [], maxItems = 10) {
-  const items = uniqueItems(values);
-  if (!items.length) return 'なし';
-  const shown = items.slice(0, maxItems).map((item) => `・${item}`);
-  if (items.length > maxItems) shown.push(`・ほか${items.length - maxItems}件`);
-  return shown.join('\n');
-}
-
-function limitText(value, max = 1000) {
-  const text = String(value || '');
-  return text.length > max ? `${text.slice(0, max)}…（省略）` : text;
-}
-
-function trimMessage(text, max = 4500) {
-  const value = String(text || '');
-  return value.length > max ? `${value.slice(0, max)}\n…長文のため一部省略しました` : value;
+function sanitizeResults(results = {}) {
+  const rawItems = Array.isArray(results.items) ? results.items : [];
+  const items = rawItems.slice(0, 20).map((item) => ({
+    label: safeShort(item.label || item.name || '工事項目', '工事項目', 80),
+    low: safeNumber(item.low, { max: 99999999 }),
+    high: safeNumber(item.high, { max: 99999999 }),
+    quantity: safeNumber(item.quantity, { max: 99999, fallback: 0 }),
+    unit: safeShort(item.unit || '', '', 10),
+    inputText: safeShort(item.inputText || '', '', 180),
+  }));
+  const consult = (Array.isArray(results.consult) ? results.consult : [])
+    .slice(0, 10)
+    .map((v) => stripDangerousText(v, 180))
+    .filter(Boolean);
+  const itemLow = items.reduce((sum, item) => sum + item.low, 0);
+  const itemHigh = items.reduce((sum, item) => sum + item.high, 0);
+  const totalLow = safeNumber(results.totalLow, { max: 99999999, fallback: itemLow });
+  const totalHigh = safeNumber(results.totalHigh, { max: 99999999, fallback: itemHigh });
+  return { items, consult, totalLow, totalHigh };
 }
 
 function selectedItemsText(selected = [], results = {}) {
   const itemLabels = (results.items || []).map((item) => item.label);
   const consult = (results.consult || []).filter(Boolean);
-  return bulletList([...itemLabels, ...consult]);
+  const fallback = (Array.isArray(selected) ? selected : [])
+    .slice(0, 30)
+    .map((key) => LABELS[key] || safeShort(key, '', 40));
+  const all = [...itemLabels, ...consult, ...fallback].filter(Boolean);
+  return all.length ? Array.from(new Set(all)).join('、').slice(0, 900) : 'なし';
 }
 
-function inputValuesText(results = {}) {
-  const items = results.items || [];
-  const parts = items.map((item) => {
-    const input = item.inputText || (item.quantity && item.unit ? `${item.quantity}${item.unit}` : '定額レンジ');
-    return `${item.label}: ${input}`;
-  });
-  const consult = (results.consult || []).filter(Boolean).map((item) => `相談: ${item}`);
-  return bulletList([...parts, ...consult]);
+function areaInputText(val = {}) {
+  if (val.mode === 'size') return `縦${safeShort(val.length)}m×横${safeShort(val.width)}m`;
+  if (val.mode === 'preset') return PRESET_AREAS[val.preset] || '目安未選択';
+  return `${safeShort(val.quantity)}㎡`;
+}
+
+function inputValuesText(selected = [], inputs = {}) {
+  const parts = [];
+  for (const key of (Array.isArray(selected) ? selected : []).slice(0, 30)) {
+    const val = inputs && typeof inputs === 'object' ? (inputs[key] || {}) : {};
+    if (['concrete','gravel','weed_gravel','turf','concrete_break','tile_deck','approach','stone_approach'].includes(key)) {
+      parts.push(`${LABELS[key] || key}: ${areaInputText(val)}`);
+    } else if (key === 'fence_mesh') {
+      const methodMap = { new: '通常新設', core: '既存ブロック上', block_add: 'ブロック1段追加' };
+      parts.push(`メッシュフェンス: 設置方法=${methodMap[val.method] || '-'} / 長さ=${safeShort(val.length)}m`);
+    } else if (key === 'carport') {
+      parts.push(`カーポート: ${safeShort(val.size)}台用`);
+    } else if (key === 'custom_consult') {
+      parts.push(`相談=${stripDangerousText(val.note || '-', 180)}`);
+    } else if (typeof val.quantity !== 'undefined') {
+      const suffix = ['privacy_fence','block_add','block_new','block_break_top','block_break_base','fence_remove'].includes(key) ? 'm' : '';
+      parts.push(`${LABELS[key] || safeShort(key)}: ${safeShort(val.quantity)}${suffix}`);
+    }
+  }
+  return parts.length ? parts.join(' / ').slice(0, 1600) : 'なし';
 }
 
 exports.handler = async (event) => {
-  if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, body: 'Method Not Allowed' };
+  const checked = validateCommonRequest(event);
+  if (!checked.ok) return checked.response;
+
+  const to = getEnvTargetUserId();
+  if (!to) return safeError(500, 'notify_unavailable');
+
+  const body = checked.body;
+  const receiptNo = normalizeReceiptNo(body.receiptNo);
+  const projectArea = normalizeProjectArea(body.projectArea);
+  const selected = Array.isArray(body.selected) ? body.selected.map((v) => safeShort(v, '', 40)).filter(Boolean) : [];
+  const inputs = sanitizeDeep(body.inputs || {});
+  const results = sanitizeResults(body.results || {});
+  const time = jstTime(body.displayedAt || new Date().toISOString());
+  const inputCount = safeInteger(body.inputCount || body.inputItemCount || body.enteredCount, { max: 80, fallback: 0 });
+  const durationSec = safeInteger(body.durationSec || body.staySeconds || body.elapsedSeconds, { max: 21600, fallback: 0 });
+
+  if (!selected.length && results.items.length === 0 && results.consult.length === 0) {
+    return safeError(400, 'empty_result');
   }
 
-  const to = process.env.LINE_TARGET_USER_ID || '';
-  if (!to) return json(400, { ok: false, reason: 'LINE_TARGET_USER_ID is not set' });
-
-  const body = JSON.parse(event.body || '{}');
-  const results = body.results || { items: [], consult: [], totalLow: 0, totalHigh: 0 };
-  const time = jstTime(body.displayedAt || new Date().toISOString());
-  const receiptNo = body.receiptNo || '-';
-  const projectArea = body.projectArea || '未入力';
-  const selected = body.selected || [];
   const estimatedPrice = `${yen(results.totalLow)}〜${yen(results.totalHigh)}`;
-  const inputItemCount = body.inputItemCount || selected.length || 0;
-  const elapsedMs = body.elapsedMs || 0;
+  const duplicateKey = `result:${receiptNo}:${estimatedPrice}:${selected.join(',')}`;
+  if (dedupe(duplicateKey, 15000)) {
+    return jsonResponse(200, { ok: true, deduped: true });
+  }
 
-  const text = trimMessage([
+  const text = safeLineText([
     '概算シミュレーター結果が表示されました',
     `・受付番号: ${receiptNo}`,
     `・エリア: ${projectArea}`,
-    `・入力項目数: ${inputItemCountText(inputItemCount)}`,
-    `・滞在時間: ${durationText(elapsedMs)}`,
-    `・項目:\n${limitText(selectedItemsText(selected, results))}`,
-    `・入力内容:\n${limitText(inputValuesText(results))}`,
+    `・項目: ${selectedItemsText(selected, results)}`,
+    `・条件: ${inputValuesText(selected, inputs)}`,
     `・概算: ${estimatedPrice}`,
+    inputCount ? `・入力項目数: ${inputCount}` : null,
+    durationSec ? `・滞在時間: ${durationSec}秒` : null,
     `・時間: ${time}`,
-  ].join('\n'));
+  ]);
 
   try {
     await pushText(to, text);
-    return json(200, { ok: true });
+    return jsonResponse(200, { ok: true });
   } catch (error) {
-    return json(error.statusCode || 500, { ok: false, reason: error.message });
+    console.error('[notify-result] push failed', { statusCode: error.statusCode, message: error.message });
+    return safeError(500, 'notify_failed');
   }
 };
