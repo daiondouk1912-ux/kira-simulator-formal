@@ -71,15 +71,15 @@ const app = document.getElementById('app');
 const STEP_LABELS = ['スタート', '工事を選ぶ', '内容を入力', '内容を確認', '概算を見る'];
 const LINE_TALK_URL = 'https://line.me/R/oaMessage/%40963rsnpu';
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
-const APP_VERSION = 'v14.0-fence-conditions';
+const APP_VERSION = 'v14.1-fence-method-price';
 const GA_MEASUREMENT_ID = (window.KIRA_GA_MEASUREMENT_ID || '').trim();
 
 const PRIVACY_FENCE_HEIGHTS = {
-  h1000: { label: 'H800〜H1000程度', low: 20000, high: 28000, minimum: { low: 120000, high: 180000 } },
-  h1200: { label: 'H1200程度', low: 24000, high: 34000, minimum: { low: 150000, high: 220000 } },
-  h1600: { label: 'H1600程度', low: 35000, high: 48000, minimum: { low: 250000, high: 350000 } },
-  h1800: { label: 'H1800程度', low: 42000, high: 58000, minimum: { low: 300000, high: 400000 } },
-  h1800plus: { label: 'H1800超・高めの目隠し', low: 55000, high: 75000, minimum: { low: 350000, high: 500000 } },
+  h1000: { label: 'H800〜H1000程度' },
+  h1200: { label: 'H1200程度' },
+  h1600: { label: 'H1600程度' },
+  h1800: { label: 'H1800程度' },
+  h1800plus: { label: 'H1800超・高めの目隠し' },
 };
 
 const PRIVACY_FENCE_METHODS = {
@@ -87,6 +87,31 @@ const PRIVACY_FENCE_METHODS = {
   block_new: 'ブロック追加・新設して取り付け',
   independent: '独立基礎で柱を建てる',
   unknown: 'まだ分からない',
+};
+
+const PRIVACY_FENCE_PRICE_MATRIX = {
+  block_existing: {
+    h1000: { low: 20000, high: 28000, minimum: { low: 120000, high: 180000 } },
+    h1200: { low: 24000, high: 34000, minimum: { low: 150000, high: 220000 } },
+  },
+  block_new: {
+    h1000: { low: 34000, high: 45000, minimum: { low: 220000, high: 300000 } },
+    h1200: { low: 38000, high: 52000, minimum: { low: 250000, high: 340000 } },
+  },
+  independent: {
+    h1000: { low: 30000, high: 40000, minimum: { low: 220000, high: 320000 } },
+    h1200: { low: 32000, high: 44000, minimum: { low: 230000, high: 330000 } },
+    h1600: { low: 35000, high: 48000, minimum: { low: 250000, high: 350000 } },
+    h1800: { low: 42000, high: 58000, minimum: { low: 300000, high: 400000 } },
+    h1800plus: { low: 55000, high: 75000, minimum: { low: 350000, high: 500000 } },
+  },
+  unknown: {
+    h1000: { low: 28000, high: 38000, minimum: { low: 180000, high: 260000 } },
+    h1200: { low: 30000, high: 42000, minimum: { low: 200000, high: 280000 } },
+    h1600: { low: 35000, high: 48000, minimum: { low: 250000, high: 350000 } },
+    h1800: { low: 42000, high: 58000, minimum: { low: 300000, high: 400000 } },
+    h1800plus: { low: 55000, high: 75000, minimum: { low: 350000, high: 500000 } },
+  },
 };
 
 function getPrivacyFenceHeightKey(input = {}) {
@@ -101,11 +126,25 @@ function isHighPrivacyFence(heightKey) {
   return ['h1600', 'h1800', 'h1800plus'].includes(heightKey);
 }
 
+function getEffectivePrivacyFenceMethodKey(input = {}) {
+  const heightKey = getPrivacyFenceHeightKey(input);
+  const methodKey = getPrivacyFenceMethodKey(input);
+  if (isHighPrivacyFence(heightKey)) return 'independent';
+  return methodKey;
+}
+
 function getPrivacyFenceMethodLabel(input = {}) {
   const heightKey = getPrivacyFenceHeightKey(input);
   const methodKey = getPrivacyFenceMethodKey(input);
   if (isHighPrivacyFence(heightKey)) return `${PRIVACY_FENCE_METHODS.independent}（H1200超のため）`;
   return PRIVACY_FENCE_METHODS[methodKey] || PRIVACY_FENCE_METHODS.block_existing;
+}
+
+function getPrivacyFencePriceRule(input = {}) {
+  const heightKey = getPrivacyFenceHeightKey(input);
+  const effectiveMethodKey = getEffectivePrivacyFenceMethodKey(input);
+  const methodRules = PRIVACY_FENCE_PRICE_MATRIX[effectiveMethodKey] || PRIVACY_FENCE_PRICE_MATRIX.block_existing;
+  return methodRules[heightKey] || PRIVACY_FENCE_PRICE_MATRIX.independent[heightKey] || PRIVACY_FENCE_PRICE_MATRIX.block_existing.h1200;
 }
 
 
@@ -309,32 +348,30 @@ function calcPrivacyFence(input = {}) {
   if (!q || q <= 0) return null;
 
   const heightKey = getPrivacyFenceHeightKey(input);
-  const methodKey = getPrivacyFenceMethodKey(input);
-  const base = PRIVACY_FENCE_HEIGHTS[heightKey] || PRIVACY_FENCE_HEIGHTS.h1200;
-  let lowUnit = base.low;
-  let highUnit = base.high;
-  let minimum = { ...base.minimum };
+  const selectedMethodKey = getPrivacyFenceMethodKey(input);
+  const effectiveMethodKey = getEffectivePrivacyFenceMethodKey(input);
+  const height = PRIVACY_FENCE_HEIGHTS[heightKey] || PRIVACY_FENCE_HEIGHTS.h1200;
+  const rule = getPrivacyFencePriceRule(input);
+  const lowUnit = rule.low;
+  const highUnit = rule.high;
+  const minimum = { ...rule.minimum };
   const notes = [
     '目隠しフェンスは、高さ・取付方法・既存ブロックの状態・風の影響により金額が変わります。',
   ];
 
   if (isHighPrivacyFence(heightKey)) {
     notes.push('H1200を超える高さは、独立基礎での施工を基本に概算しています。');
-  } else if (methodKey === 'independent') {
-    lowUnit += 8000;
-    highUnit += 12000;
-    minimum.low = Math.max(minimum.low, 220000);
-    minimum.high = Math.max(minimum.high, 320000);
-    notes.push('低めの高さでも独立基礎を選んだ場合は、基礎・柱建て分を見込んでいます。');
-  } else {
-    notes.push('ブロック上に設置する場合は、H1200程度までを目安としています。');
-  }
-
-  if (methodKey === 'block_new') {
-    notes.push('ブロック追加・新設が必要な場合は、ブロック工事の数量や基礎条件により別途金額が変わります。');
-  }
-  if (methodKey === 'unknown') {
-    notes.push('取付方法が分からない場合は、現地確認後に安全な施工方法をご案内します。');
+    if (selectedMethodKey !== 'independent') {
+      notes.push('H1200超を選択した場合は、選択された取付方法に関わらず独立基礎寄りの金額で表示します。');
+    }
+  } else if (effectiveMethodKey === 'block_existing') {
+    notes.push('既存ブロック上に設置する場合は、H1200程度までを目安としています。');
+  } else if (effectiveMethodKey === 'block_new') {
+    notes.push('ブロック追加・新設して取り付ける場合は、ブロック工事分も含めた目安です。別項目の「ブロック1段追加」と重複選択しないようご注意ください。');
+  } else if (effectiveMethodKey === 'independent') {
+    notes.push('独立基礎を選択した場合は、基礎・柱建て分を見込んだ目安です。');
+  } else if (effectiveMethodKey === 'unknown') {
+    notes.push('取付方法が分からない場合は、安く出すぎないよう少し余裕を見た目安で表示します。');
   }
 
   let totalLow = q * lowUnit;
@@ -344,7 +381,7 @@ function calcPrivacyFence(input = {}) {
   totalHigh = Math.max(totalHigh, minimum.high);
 
   return {
-    label: `目隠しフェンス（${base.label}）`,
+    label: `目隠しフェンス（${height.label}）`,
     low: totalLow,
     high: totalHigh,
     quantity: q,
@@ -354,13 +391,13 @@ function calcPrivacyFence(input = {}) {
     note: notes.join(' '),
     meta: {
       height: heightKey,
-      method: isHighPrivacyFence(heightKey) ? 'independent' : methodKey,
+      selectedMethod: selectedMethodKey,
+      method: effectiveMethodKey,
       lowUnit,
       highUnit,
     },
   };
 }
-
 
 function calcMeshFence({ type, method, length }) {
   const q = Number(length);
