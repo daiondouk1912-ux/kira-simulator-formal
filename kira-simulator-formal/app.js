@@ -1,4 +1,4 @@
-// v13.8: 行動分析強化（滞在時間・入力項目数・問い合わせ押下通知） + v13.7の導線整理
+// v14.0: フェンス条件分岐・価格調整（LIXILフェンスAB基準） + v13.9セキュリティ強化後の安定版
 // 計算に使う公開用レンジは publicPriceMaster.js から読み込みます。
 // 原価・人工原価・利益率などの内部情報は、このお客さま用アプリには入れません。
 const {
@@ -47,7 +47,7 @@ const state = {
     weed_gravel: makeQuantityInput(),
     turf: makeQuantityInput(),
     fence_mesh: { type: 'mesh', method: 'new', length: '' },
-    privacy_fence: { quantity: '' },
+    privacy_fence: { length: '', height: 'h1200', method: 'block_existing' },
     block_add: { quantity: '' },
     block_new: { quantity: '' },
     carport: { size: '1' },
@@ -71,8 +71,44 @@ const app = document.getElementById('app');
 const STEP_LABELS = ['スタート', '工事を選ぶ', '内容を入力', '内容を確認', '概算を見る'];
 const LINE_TALK_URL = 'https://line.me/R/oaMessage/%40963rsnpu';
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
-const APP_VERSION = 'v13.8-action-analysis';
+const APP_VERSION = 'v14.0-fence-conditions';
 const GA_MEASUREMENT_ID = (window.KIRA_GA_MEASUREMENT_ID || '').trim();
+
+const PRIVACY_FENCE_HEIGHTS = {
+  h1000: { label: 'H800〜H1000程度', low: 20000, high: 28000, minimum: { low: 120000, high: 180000 } },
+  h1200: { label: 'H1200程度', low: 24000, high: 34000, minimum: { low: 150000, high: 220000 } },
+  h1600: { label: 'H1600程度', low: 35000, high: 48000, minimum: { low: 250000, high: 350000 } },
+  h1800: { label: 'H1800程度', low: 42000, high: 58000, minimum: { low: 300000, high: 400000 } },
+  h1800plus: { label: 'H1800超・高めの目隠し', low: 55000, high: 75000, minimum: { low: 350000, high: 500000 } },
+};
+
+const PRIVACY_FENCE_METHODS = {
+  block_existing: '既存ブロック上に取り付け',
+  block_new: 'ブロック追加・新設して取り付け',
+  independent: '独立基礎で柱を建てる',
+  unknown: 'まだ分からない',
+};
+
+function getPrivacyFenceHeightKey(input = {}) {
+  return PRIVACY_FENCE_HEIGHTS[input.height] ? input.height : 'h1200';
+}
+
+function getPrivacyFenceMethodKey(input = {}) {
+  return PRIVACY_FENCE_METHODS[input.method] ? input.method : 'block_existing';
+}
+
+function isHighPrivacyFence(heightKey) {
+  return ['h1600', 'h1800', 'h1800plus'].includes(heightKey);
+}
+
+function getPrivacyFenceMethodLabel(input = {}) {
+  const heightKey = getPrivacyFenceHeightKey(input);
+  const methodKey = getPrivacyFenceMethodKey(input);
+  if (isHighPrivacyFence(heightKey)) return `${PRIVACY_FENCE_METHODS.independent}（H1200超のため）`;
+  return PRIVACY_FENCE_METHODS[methodKey] || PRIVACY_FENCE_METHODS.block_existing;
+}
+
+
 
 function fnUrl(name) {
   return `${window.location.origin}/.netlify/functions/${name}`;
@@ -259,6 +295,73 @@ function calcFromMaster(key, quantity) {
   };
 }
 
+
+function privacyFenceInputText(input = {}) {
+  const length = input.length || '-';
+  const heightKey = getPrivacyFenceHeightKey(input);
+  const heightLabel = PRIVACY_FENCE_HEIGHTS[heightKey].label;
+  const methodLabel = getPrivacyFenceMethodLabel(input);
+  return `長さ：${length}m / 高さ：${heightLabel} / 取付方法：${methodLabel}`;
+}
+
+function calcPrivacyFence(input = {}) {
+  const q = Number(input.length || 0);
+  if (!q || q <= 0) return null;
+
+  const heightKey = getPrivacyFenceHeightKey(input);
+  const methodKey = getPrivacyFenceMethodKey(input);
+  const base = PRIVACY_FENCE_HEIGHTS[heightKey] || PRIVACY_FENCE_HEIGHTS.h1200;
+  let lowUnit = base.low;
+  let highUnit = base.high;
+  let minimum = { ...base.minimum };
+  const notes = [
+    '目隠しフェンスは、高さ・取付方法・既存ブロックの状態・風の影響により金額が変わります。',
+  ];
+
+  if (isHighPrivacyFence(heightKey)) {
+    notes.push('H1200を超える高さは、独立基礎での施工を基本に概算しています。');
+  } else if (methodKey === 'independent') {
+    lowUnit += 8000;
+    highUnit += 12000;
+    minimum.low = Math.max(minimum.low, 220000);
+    minimum.high = Math.max(minimum.high, 320000);
+    notes.push('低めの高さでも独立基礎を選んだ場合は、基礎・柱建て分を見込んでいます。');
+  } else {
+    notes.push('ブロック上に設置する場合は、H1200程度までを目安としています。');
+  }
+
+  if (methodKey === 'block_new') {
+    notes.push('ブロック追加・新設が必要な場合は、ブロック工事の数量や基礎条件により別途金額が変わります。');
+  }
+  if (methodKey === 'unknown') {
+    notes.push('取付方法が分からない場合は、現地確認後に安全な施工方法をご案内します。');
+  }
+
+  let totalLow = q * lowUnit;
+  let totalHigh = q * highUnit;
+  const minimumApplied = totalLow < minimum.low || totalHigh < minimum.high;
+  totalLow = Math.max(totalLow, minimum.low);
+  totalHigh = Math.max(totalHigh, minimum.high);
+
+  return {
+    label: `目隠しフェンス（${base.label}）`,
+    low: totalLow,
+    high: totalHigh,
+    quantity: q,
+    unit: 'm',
+    rule: minimumApplied ? 'minimum' : 'unit',
+    inputText: privacyFenceInputText(input),
+    note: notes.join(' '),
+    meta: {
+      height: heightKey,
+      method: isHighPrivacyFence(heightKey) ? 'independent' : methodKey,
+      lowUnit,
+      highUnit,
+    },
+  };
+}
+
+
 function calcMeshFence({ type, method, length }) {
   const q = Number(length);
   if (!q || q <= 0) return null;
@@ -392,6 +495,11 @@ function computeResults() {
   const consult = [];
 
   for (const key of state.selected) {
+    if (key === 'privacy_fence') {
+      const result = calcPrivacyFence(state.inputs.privacy_fence);
+      if (result) items.push(result);
+      continue;
+    }
     if (QUANTITY_KEYS.includes(key)) {
       const result = calcFromMaster(key, getQuantityValue(key));
       if (result) items.push(result);
@@ -528,7 +636,9 @@ function selectedLabels() {
 function currentInputSummary() {
   const parts = [];
   for (const key of state.selected) {
-    if (QUANTITY_KEYS.includes(key)) {
+    if (key === 'privacy_fence') {
+      parts.push(`目隠しフェンス: ${privacyFenceInputText(state.inputs.privacy_fence)}`);
+    } else if (QUANTITY_KEYS.includes(key)) {
       const meta = PRICE_MASTER[key];
       parts.push(`${meta.label}: ${quantityInputLabel(key)}`);
     } else if (key === 'fence_mesh') {
@@ -676,6 +786,11 @@ function validateSelectedInputs() {
   for (const key of state.selected) {
     const label = WORK_OPTIONS.find((item) => item.id === key)?.label || key;
     const input = state.inputs[key];
+
+    if (key === 'privacy_fence') {
+      if (!hasPositive(state.inputs.privacy_fence.length)) messages.push('目隠しフェンス：長さを入力してください。');
+      continue;
+    }
 
     if (AREA_KEYS.has(key)) {
       if (!input) continue;
@@ -873,6 +988,31 @@ function renderStep2() {
   const blocks = [];
 
   state.selected.forEach((key) => {
+    if (key === 'privacy_fence') {
+      const v = state.inputs.privacy_fence;
+      blocks.push(fieldBlock('目隠しフェンス', 'LIXILフェンスAB系を基準に、高さと取付方法で概算目安を切り替えます。', `
+        <div class="field-row">
+          <div class="field">
+            <label>長さ（m）</label>
+            <input type="number" min="0" step="0.1" data-key="privacy_fence" data-name="length" value="${v.length}" placeholder="例）10" />
+          </div>
+          <div class="field">
+            <label>高さの目安</label>
+            <select data-key="privacy_fence" data-name="height">
+              ${Object.entries(PRIVACY_FENCE_HEIGHTS).map(([value, item]) => `<option value="${value}" ${v.height === value ? 'selected' : ''}>${item.label}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label>取付方法</label>
+            <select data-key="privacy_fence" data-name="method">
+              ${Object.entries(PRIVACY_FENCE_METHODS).map(([value, label]) => `<option value="${value}" ${v.method === value ? 'selected' : ''}>${label}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <p class="field-help">ブロック上に設置する場合はH1200程度までを目安とし、それ以上の高さは独立基礎での施工を基本に概算します。</p>
+      `));
+      return;
+    }
     if (QUANTITY_KEYS.includes(key)) {
       const meta = PRICE_MASTER[key];
       if (AREA_KEYS.has(key)) blocks.push(renderAreaInputBlock(key, meta));
@@ -1009,6 +1149,11 @@ function renderStep2() {
 function renderStep3() {
   const step = createStep(3, '内容を確認');
   const lines = state.selected.map((key) => {
+    if (key === 'privacy_fence') {
+      const v = state.inputs.privacy_fence;
+      const heightKey = getPrivacyFenceHeightKey(v);
+      return `<div class="summary-item"><h4>目隠しフェンス</h4><div>長さ：${v.length || '-'}m</div><div>高さ：${PRIVACY_FENCE_HEIGHTS[heightKey].label}</div><div>取付方法：${getPrivacyFenceMethodLabel(v)}</div></div>`;
+    }
     if (key === 'fence_mesh') {
       const v = state.inputs.fence_mesh;
       const methodMap = { new: '通常新設', core: '既存ブロック上', block_add: 'ブロック1段追加' };

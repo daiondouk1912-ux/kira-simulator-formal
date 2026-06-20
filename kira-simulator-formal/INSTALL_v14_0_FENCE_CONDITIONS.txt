@@ -1,0 +1,27 @@
+【KirA外構概算シミュレーター v14.0 フェンス条件分岐・価格調整版】
+
+上書きするファイル：
+1. GitHub直下
+- app.js
+- index.html
+- README_v14_0_FENCE_CONDITIONS.md
+- DEPLOY_CHECKLIST_v14_0.md
+
+2. netlify/functions
+- notify-result.js
+
+触らないファイル：
+- publicPriceMaster.js
+- styles.css
+- security-client.js
+- _headers
+- notify-start.js
+- notify-event.js
+- _security.js
+- _line.js
+- line-webhook.js
+- notify-test.js
+- netlify.toml
+
+確認URL：
+https://kira-simulator-formal.netlify.app/?v=140
