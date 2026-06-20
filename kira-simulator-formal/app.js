@@ -46,7 +46,7 @@ const state = {
     gravel: makeQuantityInput(),
     weed_gravel: makeQuantityInput(),
     turf: makeQuantityInput(),
-    fence_mesh: { type: 'mesh', method: 'new', length: '' },
+    fence_mesh: { type: 'mesh', method: 'new', height: 'h800', length: '' },
     privacy_fence: { length: '', height: 'h1200', method: 'block_existing' },
     block_add: { quantity: '' },
     block_new: { quantity: '' },
@@ -71,7 +71,7 @@ const app = document.getElementById('app');
 const STEP_LABELS = ['スタート', '工事を選ぶ', '内容を入力', '内容を確認', '概算を見る'];
 const LINE_TALK_URL = 'https://line.me/R/oaMessage/%40963rsnpu';
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
-const APP_VERSION = 'v14.1-fence-method-price';
+const APP_VERSION = 'v14.2-mesh-fence-height-price';
 const GA_MEASUREMENT_ID = (window.KIRA_GA_MEASUREMENT_ID || '').trim();
 
 const PRIVACY_FENCE_HEIGHTS = {
@@ -113,6 +113,63 @@ const PRIVACY_FENCE_PRICE_MATRIX = {
     h1800plus: { low: 55000, high: 75000, minimum: { low: 350000, high: 500000 } },
   },
 };
+
+
+const MESH_FENCE_HEIGHTS = {
+  h600: { label: 'H600程度' },
+  h800: { label: 'H800程度' },
+  h1000: { label: 'H1000程度' },
+  h1200: { label: 'H1200程度' },
+};
+
+const MESH_FENCE_METHODS = {
+  new: '通常新設',
+  core: '既存ブロック上・コア抜き',
+  block_add: 'ブロック1段追加',
+};
+
+const MESH_FENCE_PRICE_MATRIX = {
+  new: {
+    h600: { low: 8500, high: 10500, minimum: { low: 85000, high: 120000 } },
+    h800: { low: 9000, high: 11000, minimum: { low: 90000, high: 130000 } },
+    h1000: { low: 10000, high: 12500, minimum: { low: 100000, high: 140000 } },
+    h1200: { low: 11000, high: 14000, minimum: { low: 110000, high: 160000 } },
+  },
+  core: {
+    h600: { low: 11500, high: 14000, minimum: { low: 170000, high: 240000 } },
+    h800: { low: 12000, high: 14500, minimum: { low: 180000, high: 250000 } },
+    h1000: { low: 13000, high: 16000, minimum: { low: 190000, high: 270000 } },
+    h1200: { low: 14500, high: 17500, minimum: { low: 200000, high: 290000 } },
+  },
+  block_add: {
+    h600: { low: 13500, high: 16500, minimum: { low: 210000, high: 290000 } },
+    h800: { low: 14000, high: 17000, minimum: { low: 220000, high: 300000 } },
+    h1000: { low: 15000, high: 18500, minimum: { low: 230000, high: 320000 } },
+    h1200: { low: 16000, high: 20000, minimum: { low: 240000, high: 340000 } },
+  },
+};
+
+function getMeshFenceHeightKey(input = {}) {
+  return MESH_FENCE_HEIGHTS[input.height] ? input.height : 'h800';
+}
+
+function getMeshFenceMethodKey(input = {}) {
+  return MESH_FENCE_METHODS[input.method] ? input.method : 'new';
+}
+
+function getMeshFencePriceRule(input = {}) {
+  const methodKey = getMeshFenceMethodKey(input);
+  const heightKey = getMeshFenceHeightKey(input);
+  const methodRules = MESH_FENCE_PRICE_MATRIX[methodKey] || MESH_FENCE_PRICE_MATRIX.new;
+  return methodRules[heightKey] || MESH_FENCE_PRICE_MATRIX.new.h800;
+}
+
+function meshFenceInputText(input = {}) {
+  const length = input.length || '-';
+  const heightKey = getMeshFenceHeightKey(input);
+  const methodKey = getMeshFenceMethodKey(input);
+  return `長さ：${length}m / 高さ：${MESH_FENCE_HEIGHTS[heightKey].label} / 設置方法：${MESH_FENCE_METHODS[methodKey]}`;
+}
 
 function getPrivacyFenceHeightKey(input = {}) {
   return PRIVACY_FENCE_HEIGHTS[input.height] ? input.height : 'h1200';
@@ -399,23 +456,25 @@ function calcPrivacyFence(input = {}) {
   };
 }
 
-function calcMeshFence({ type, method, length }) {
+function calcMeshFence(input = {}) {
+  const { type, length } = input;
   const q = Number(length);
   if (!q || q <= 0) return null;
-  let variant = '通常新設';
-  let low = 9000;
-  let high = 11000;
-  let minimum = { low: 90000, high: 130000 };
+  if (type !== 'mesh') return null;
 
-  if (type === 'mesh' && method === 'core') {
-    variant = '既存ブロック上・コア抜きあり';
-    low = 12000; high = 14500; minimum = { low: 180000, high: 250000 };
-  } else if (type === 'mesh' && method === 'block_add') {
-    variant = 'ブロック1段追加';
-    low = 14000; high = 17000; minimum = { low: 220000, high: 300000 };
-  } else if (type !== 'mesh') {
-    return null;
-  }
+  const heightKey = getMeshFenceHeightKey(input);
+  const methodKey = getMeshFenceMethodKey(input);
+  const height = MESH_FENCE_HEIGHTS[heightKey] || MESH_FENCE_HEIGHTS.h800;
+  const methodLabel = MESH_FENCE_METHODS[methodKey] || MESH_FENCE_METHODS.new;
+  const rule = getMeshFencePriceRule(input);
+  const low = rule.low;
+  const high = rule.high;
+  const minimum = { ...rule.minimum };
+  const notes = [
+    'メッシュフェンスは、高さ・取付方法・既存ブロックの状態により金額が変わります。',
+  ];
+  if (methodKey === 'core') notes.push('既存ブロック上の場合は、コア抜き・穴あけ条件により金額が変わります。');
+  if (methodKey === 'block_add') notes.push('ブロック1段追加を含む目安です。別項目の「ブロック1段追加」と重複選択しないようご注意ください。');
 
   let totalLow = q * low;
   let totalHigh = q * high;
@@ -424,14 +483,15 @@ function calcMeshFence({ type, method, length }) {
   totalHigh = Math.max(totalHigh, minimum.high);
 
   return {
-    label: `メッシュフェンス（${variant}）`,
+    label: `メッシュフェンス（${methodLabel}・${height.label}）`,
     low: totalLow,
     high: totalHigh,
     quantity: q,
     unit: 'm',
     rule: minimumApplied ? 'minimum' : 'unit',
-    inputText: `長さ：${length || '-'}m / 設置方法：${variant}`,
-    meta: { type, method, variant },
+    inputText: meshFenceInputText(input),
+    note: notes.join(' '),
+    meta: { type, method: methodKey, height: heightKey, variant: methodLabel, lowUnit: low, highUnit: high },
   };
 }
 
@@ -679,9 +739,7 @@ function currentInputSummary() {
       const meta = PRICE_MASTER[key];
       parts.push(`${meta.label}: ${quantityInputLabel(key)}`);
     } else if (key === 'fence_mesh') {
-      const v = state.inputs.fence_mesh;
-      const methodMap = { new: '通常新設', core: '既存ブロック上・コア抜き', block_add: 'ブロック1段追加' };
-      parts.push(`メッシュフェンス: ${methodMap[v.method] || '-'} / 長さ${v.length || '-'}m`);
+      parts.push(`メッシュフェンス: ${meshFenceInputText(state.inputs.fence_mesh)}`);
     } else if (key === 'carport') {
       parts.push(`カーポート: ${state.inputs.carport.size || '-'}台用`);
     } else if (['tile_deck','approach','stone_approach'].includes(key)) {
@@ -1056,27 +1114,33 @@ function renderStep2() {
       else blocks.push(renderSimpleQuantityBlock(key, meta));
     }
     if (key === 'fence_mesh') {
-      blocks.push(fieldBlock('メッシュフェンス', '設置方法と長さをもとに概算目安を表示します。', `
+      const v = state.inputs.fence_mesh;
+      blocks.push(fieldBlock('メッシュフェンス', 'LIXIL系メッシュフェンスを基準に、高さ・設置方法・長さで概算目安を切り替えます。', `
         <div class="field-row">
           <div class="field">
             <label>種類</label>
             <select data-key="fence_mesh" data-name="type">
-              <option value="mesh" ${state.inputs.fence_mesh.type === 'mesh' ? 'selected' : ''}>メッシュフェンス</option>
+              <option value="mesh" ${v.type === 'mesh' ? 'selected' : ''}>メッシュフェンス</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>高さの目安</label>
+            <select data-key="fence_mesh" data-name="height">
+              ${Object.entries(MESH_FENCE_HEIGHTS).map(([value, item]) => `<option value="${value}" ${getMeshFenceHeightKey(v) === value ? 'selected' : ''}>${item.label}</option>`).join('')}
             </select>
           </div>
           <div class="field">
             <label>設置方法</label>
             <select data-key="fence_mesh" data-name="method">
-              <option value="new" ${state.inputs.fence_mesh.method === 'new' ? 'selected' : ''}>通常新設</option>
-              <option value="core" ${state.inputs.fence_mesh.method === 'core' ? 'selected' : ''}>既存ブロック上・コア抜き</option>
-              <option value="block_add" ${state.inputs.fence_mesh.method === 'block_add' ? 'selected' : ''}>ブロック1段追加</option>
+              ${Object.entries(MESH_FENCE_METHODS).map(([value, label]) => `<option value="${value}" ${getMeshFenceMethodKey(v) === value ? 'selected' : ''}>${label}</option>`).join('')}
             </select>
           </div>
           <div class="field">
             <label>長さ（m）</label>
-            <input type="number" min="0" step="0.1" data-key="fence_mesh" data-name="length" value="${state.inputs.fence_mesh.length}" placeholder="例）20" />
+            <input type="number" min="0" step="0.1" data-key="fence_mesh" data-name="length" value="${v.length}" placeholder="例）20" />
           </div>
         </div>
+        <p class="field-help">既存ブロック上やブロック1段追加の場合は、穴あけ・ブロック状態・施工条件により金額が変わります。</p>
       `));
     }
     if (key === 'carport') {
@@ -1193,8 +1257,9 @@ function renderStep3() {
     }
     if (key === 'fence_mesh') {
       const v = state.inputs.fence_mesh;
-      const methodMap = { new: '通常新設', core: '既存ブロック上', block_add: 'ブロック1段追加' };
-      return `<div class="summary-item"><h4>メッシュフェンス</h4><div>種類：メッシュフェンス</div><div>設置方法：${methodMap[v.method]}</div><div>長さ：${v.length || '-'}m</div></div>`;
+      const heightKey = getMeshFenceHeightKey(v);
+      const methodKey = getMeshFenceMethodKey(v);
+      return `<div class="summary-item"><h4>メッシュフェンス</h4><div>種類：メッシュフェンス</div><div>高さ：${MESH_FENCE_HEIGHTS[heightKey].label}</div><div>設置方法：${MESH_FENCE_METHODS[methodKey]}</div><div>長さ：${v.length || '-'}m</div></div>`;
     }
     if (key === 'carport') {
       return `<div class="summary-item"><h4>カーポート</h4><div>台数：${state.inputs.carport.size}台用</div></div>`;
