@@ -75,6 +75,27 @@ function privacyFenceInputText(val = {}) {
 }
 
 
+const MESH_FENCE_HEIGHTS = {
+  h600: 'H600程度',
+  h800: 'H800程度',
+  h1000: 'H1000程度',
+  h1200: 'H1200程度',
+};
+
+const MESH_FENCE_METHODS = {
+  new: '通常新設',
+  core: '既存ブロック上・コア抜き',
+  block_add: 'ブロック1段追加',
+};
+
+function meshFenceInputText(val = {}) {
+  const length = safeShort(val.length || '-');
+  const height = MESH_FENCE_HEIGHTS[val.height] || MESH_FENCE_HEIGHTS.h800;
+  const method = MESH_FENCE_METHODS[val.method] || MESH_FENCE_METHODS.new;
+  return `メッシュフェンス: 長さ=${length}m / 高さ=${height} / 設置方法=${method}`;
+}
+
+
 function yen(value) {
   return new Intl.NumberFormat('ja-JP', { style: 'currency', currency: 'JPY', maximumFractionDigits: 0 }).format(safeNumber(value));
 }
@@ -133,8 +154,7 @@ function inputValuesText(selected = [], inputs = {}) {
     if (['concrete','gravel','weed_gravel','turf','concrete_break','tile_deck','approach','stone_approach'].includes(key)) {
       parts.push(`${LABELS[key] || key}: ${areaInputText(val)}`);
     } else if (key === 'fence_mesh') {
-      const methodMap = { new: '通常新設', core: '既存ブロック上', block_add: 'ブロック1段追加' };
-      parts.push(`メッシュフェンス: 設置方法=${methodMap[val.method] || '-'} / 長さ=${safeShort(val.length)}m`);
+      parts.push(meshFenceInputText(val));
     } else if (key === 'privacy_fence') {
       parts.push(privacyFenceInputText(val));
     } else if (key === 'carport') {
