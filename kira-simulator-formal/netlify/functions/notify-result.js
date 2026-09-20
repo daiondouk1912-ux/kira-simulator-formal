@@ -137,7 +137,7 @@ function selectedItemsText(selected = [], results = {}) {
   const fallback = (Array.isArray(selected) ? selected : [])
     .slice(0, 30)
     .map((key) => LABELS[key] || safeShort(key, '', 40));
-  const all = [...itemLabels, ...consult, ...fallback].filter(Boolean);
+  const all = (itemLabels.length || consult.length ? [...itemLabels, ...consult] : fallback).filter(Boolean);
   return all.length ? Array.from(new Set(all)).join('、').slice(0, 900) : 'なし';
 }
 
