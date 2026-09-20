@@ -1,4 +1,4 @@
-// v14.3: カーポート3台用の概算反映・表示改善 + v14.2フェンス条件分岐
+// v14.4.1: 最近のKirA見積実績を反映（人工芝補正 + ブロック新設の種類・高さ・長さ分岐）
 // 計算に使う公開用レンジは publicPriceMaster.js から読み込みます。
 // 原価・人工原価・利益率などの内部情報は、このお客さま用アプリには入れません。
 const {
@@ -49,7 +49,7 @@ const state = {
     fence_mesh: { type: 'mesh', method: 'new', height: 'h800', length: '' },
     privacy_fence: { length: '', height: 'h1200', method: 'block_existing' },
     block_add: { quantity: '' },
-    block_new: { quantity: '' },
+    block_new: { kind: '', height: '', quantity: '' },
     carport: { size: '1' },
     concrete_break: makeQuantityInput(),
     block_break_top: { quantity: '' },
@@ -71,7 +71,7 @@ const app = document.getElementById('app');
 const STEP_LABELS = ['スタート', '工事を選ぶ', '内容を入力', '内容を確認', '概算を見る'];
 const LINE_TALK_URL = 'https://line.me/R/oaMessage/%40963rsnpu';
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
-const APP_VERSION = 'v14.3-carport3-price-fix';
+const APP_VERSION = 'v14.4.1-recent-estimate-block-kind-height';
 const GA_MEASUREMENT_ID = (window.KIRA_GA_MEASUREMENT_ID || '').trim();
 
 const CARPORT_SIZE_RANGES = {
@@ -524,6 +524,54 @@ function calcMeshFence(input = {}) {
 }
 
 
+function getBlockNewKindRule(input = {}) {
+  const def = PRICE_MASTER.block_new || {};
+  const kinds = def.kinds || {};
+  return kinds[input.kind] || null;
+}
+
+function getBlockNewHeightRule(input = {}) {
+  const kindRule = getBlockNewKindRule(input);
+  const rules = kindRule?.heightOptions || {};
+  return rules[input.height] || null;
+}
+
+function blockNewInputText(input = {}) {
+  const kindRule = getBlockNewKindRule(input);
+  const heightRule = getBlockNewHeightRule(input);
+  const kindLabel = kindRule?.shortLabel || kindRule?.label || '種類未選択';
+  const heightLabel = heightRule?.label || '高さ未選択';
+  return `種類：${kindLabel} / 高さ：${heightLabel} / 長さ：${input.quantity || '-'}m`;
+}
+
+function calcBlockNew(input = {}) {
+  const q = Number(input.quantity || 0);
+  const def = PRICE_MASTER.block_new;
+  const kindRule = getBlockNewKindRule(input);
+  const heightRule = getBlockNewHeightRule(input);
+  if (!def || !q || q <= 0 || !kindRule || !heightRule) return null;
+
+  let low = q * heightRule.low;
+  let high = q * heightRule.high;
+  let minimumApplied = false;
+  if (heightRule.minimum) {
+    if (low < heightRule.minimum.low) { low = heightRule.minimum.low; minimumApplied = true; }
+    if (high < heightRule.minimum.high) { high = heightRule.minimum.high; minimumApplied = true; }
+  }
+
+  return {
+    label: `${def.label}（${kindRule.shortLabel || kindRule.label}・${heightRule.label}）`,
+    low,
+    high,
+    quantity: q,
+    unit: 'm',
+    rule: minimumApplied ? 'minimum' : 'unit',
+    inputText: blockNewInputText(input),
+    note: `${kindRule.note || ''} ${def.note || ''}`.trim(),
+    meta: { kind: input.kind, height: input.height, lowUnit: heightRule.low, highUnit: heightRule.high },
+  };
+}
+
 function v12AreaBandResult(key, q) {
   if (!q || q <= 0) return null;
   const label = V12_LABELS[key];
@@ -622,6 +670,11 @@ function computeResults() {
   for (const key of state.selected) {
     if (key === 'privacy_fence') {
       const result = calcPrivacyFence(state.inputs.privacy_fence);
+      if (result) items.push(result);
+      continue;
+    }
+    if (key === 'block_new') {
+      const result = calcBlockNew(state.inputs.block_new);
       if (result) items.push(result);
       continue;
     }
@@ -762,6 +815,8 @@ function currentInputSummary() {
   for (const key of state.selected) {
     if (key === 'privacy_fence') {
       parts.push(`目隠しフェンス: ${privacyFenceInputText(state.inputs.privacy_fence)}`);
+    } else if (key === 'block_new') {
+      parts.push(`ブロック新設（ベースから）: ${blockNewInputText(state.inputs.block_new)}`);
     } else if (QUANTITY_KEYS.includes(key)) {
       const meta = PRICE_MASTER[key];
       parts.push(`${meta.label}: ${quantityInputLabel(key)}`);
@@ -927,6 +982,13 @@ function validateSelectedInputs() {
       } else if (!hasPositive(input.quantity)) {
         messages.push(`${label}：面積を入力してください。分からない場合は「縦×横」または「目安から選ぶ」をご利用ください。`);
       }
+      continue;
+    }
+
+    if (key === 'block_new') {
+      if (!getBlockNewKindRule(input)) messages.push('ブロック新設（ベースから）：ブロックの種類を選択してください。');
+      if (!getBlockNewHeightRule(input)) messages.push('ブロック新設（ベースから）：高さ・段数を選択してください。');
+      if (!hasPositive(input?.quantity)) messages.push('ブロック新設（ベースから）：長さを入力してください。');
       continue;
     }
 
@@ -1135,6 +1197,36 @@ function renderStep2() {
       `));
       return;
     }
+    if (key === 'block_new') {
+      const v = state.inputs.block_new;
+      const kinds = PRICE_MASTER.block_new?.kinds || {};
+      const selectedKind = kinds[v.kind] || null;
+      const heightOptions = selectedKind?.heightOptions || {};
+      blocks.push(fieldBlock('ブロック新設（ベースから）', 'ブロックの種類 → 高さ（段数） → 長さの順に選んでください。', `
+        <div class="field">
+          <label>ブロックの種類</label>
+          <select data-key="block_new" data-name="kind">
+            <option value="" ${!v.kind ? 'selected' : ''}>選択してください</option>
+            ${Object.entries(kinds).map(([value, item]) => `<option value="${value}" ${v.kind === value ? 'selected' : ''}>${item.label}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label>高さ・段数</label>
+            <select data-key="block_new" data-name="height" ${!v.kind ? 'disabled' : ''}>
+              <option value="" ${!v.height ? 'selected' : ''}>${v.kind ? '選択してください' : '先に種類を選択'}</option>
+              ${Object.entries(heightOptions).map(([value, item]) => `<option value="${value}" ${v.height === value ? 'selected' : ''}>${item.label}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label>長さ（m）</label>
+            <input type="number" min="0" step="0.1" data-key="block_new" data-name="quantity" value="${v.quantity}" placeholder="例）10" />
+          </div>
+        </div>
+        <p class="field-help">標準ブロックは普通CB・楽目地など、化粧ブロックはスクエアC・スマートC・リブロックRXなどを想定しています。高低差を支える土留めとして使う場合は「土留め・高低差調整」を選んでください。</p>
+      `));
+      return;
+    }
     if (QUANTITY_KEYS.includes(key)) {
       const meta = PRICE_MASTER[key];
       if (AREA_KEYS.has(key)) blocks.push(renderAreaInputBlock(key, meta));
@@ -1263,8 +1355,9 @@ function renderStep2() {
       const name = e.target.dataset.name;
       if (!key || !name) return;
       state.inputs[key][name] = e.target.value;
+      if (key === 'block_new' && name === 'kind') state.inputs.block_new.height = '';
       state.validationMessage = '';
-      if (name === 'mode' || name === 'preset') render();
+      if (name === 'mode' || name === 'preset' || (key === 'block_new' && name === 'kind')) render();
     });
   });
 
@@ -1288,6 +1381,12 @@ function renderStep3() {
       const heightKey = getMeshFenceHeightKey(v);
       const methodKey = getMeshFenceMethodKey(v);
       return `<div class="summary-item"><h4>メッシュフェンス</h4><div>種類：メッシュフェンス</div><div>高さ：${MESH_FENCE_HEIGHTS[heightKey].label}</div><div>設置方法：${MESH_FENCE_METHODS[methodKey]}</div><div>長さ：${v.length || '-'}m</div></div>`;
+    }
+    if (key === 'block_new') {
+      const v = state.inputs.block_new;
+      const kindRule = getBlockNewKindRule(v);
+      const heightRule = getBlockNewHeightRule(v);
+      return `<div class="summary-item"><h4>ブロック新設（ベースから）</h4><div>種類：${kindRule?.label || '未選択'}</div><div>高さ：${heightRule?.label || '未選択'}</div><div>長さ：${v.quantity || '-'}m</div></div>`;
     }
     if (key === 'carport') {
       return `<div class="summary-item"><h4>カーポート</h4><div>台数：${state.inputs.carport.size}台用</div></div>`;

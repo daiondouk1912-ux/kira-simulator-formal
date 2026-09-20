@@ -1,4 +1,5 @@
 // KirA 公開用 概算マスター
+// v14.4.1: 最近のKirA見積実績を反映（人工芝補正 + ブロック新設の種類・高さ・長さ分岐）
 // 注意：このファイルには、お客さまに見えてよい概算レンジだけを入れます。
 // 原価・人工原価・利益率などの内部情報は絶対に入れないでください。
 (function () {
@@ -37,12 +38,12 @@ const PRICE_MASTER = {
   turf: {
     label: '人工芝', unit: '㎡',
     brackets: [
-      { max: 15, low: 9500, high: 12000 },
-      { max: 40, low: 8500, high: 10500 },
-      { max: 80, low: 7800, high: 9500 },
-      { max: Infinity, low: 6800, high: 8500 },
+      { max: 15, low: 15500, high: 19500 },
+      { max: 40, low: 14500, high: 18000 },
+      { max: 80, low: 13500, high: 17000 },
+      { max: Infinity, low: 12500, high: 16000 },
     ],
-    minimum: { low: 100000, high: 140000 },
+    minimum: { low: 150000, high: 200000 },
   },
   privacy_fence: {
     label: '目隠しフェンス', unit: 'm',
@@ -56,8 +57,35 @@ const PRICE_MASTER = {
   },
   block_new: {
     label: 'ブロック新設（ベースから）', unit: 'm',
-    brackets: [{ max: Infinity, low: 12000, high: 14000 }],
-    minimum: { low: 120000, high: 150000 },
+    kinds: {
+      standard: {
+        label: '標準ブロック（普通CB・楽目地など）',
+        shortLabel: '標準ブロック',
+        heightOptions: {
+          h200:  { label: '1段・H200程度',  low: 10000, high: 15000, minimum: { low: 80000,  high: 120000 } },
+          h400:  { label: '2段・H400程度',  low: 12000, high: 17000, minimum: { low: 100000, high: 140000 } },
+          h600:  { label: '3段・H600程度',  low: 14000, high: 20000, minimum: { low: 120000, high: 160000 } },
+          h800:  { label: '4段・H800程度',  low: 16000, high: 23000, minimum: { low: 140000, high: 190000 } },
+          h1000: { label: '5段・H1000程度', low: 18000, high: 25000, minimum: { low: 160000, high: 220000 } },
+          h1200: { label: '6段・H1200程度', low: 20000, high: 28000, minimum: { low: 180000, high: 250000 } },
+        },
+        note: '普通CB・楽目地などの標準的なブロックを想定した目安です。',
+      },
+      decorative: {
+        label: '化粧ブロック（スクエアC・スマートC・リブロックRXなど）',
+        shortLabel: '化粧ブロック',
+        heightOptions: {
+          h200:  { label: '1段・H200程度',  low: 15000, high: 22000, minimum: { low: 120000, high: 180000 } },
+          h400:  { label: '2段・H400程度',  low: 18000, high: 26000, minimum: { low: 140000, high: 200000 } },
+          h600:  { label: '3段・H600程度',  low: 24000, high: 34000, minimum: { low: 160000, high: 230000 } },
+          h800:  { label: '4段・H800程度',  low: 28000, high: 40000, minimum: { low: 180000, high: 260000 } },
+          h1000: { label: '5段・H1000程度', low: 33000, high: 46000, minimum: { low: 220000, high: 300000 } },
+          h1200: { label: '6段・H1200程度', low: 40000, high: 55000, minimum: { low: 250000, high: 360000 } },
+        },
+        note: '化粧ブロックは商品グレード・色・形状で材料価格が変わるため、標準ブロックより幅を広く取っています。',
+      },
+    },
+    note: '境界・囲い用途の概算です。土圧を受ける土留め、高基礎、特殊配筋、狭小搬入などは別途確認が必要です。',
   },
   carport1: { label: 'カーポート1台用', fixed: { low: 250000, high: 300000 } },
   carport2: { label: 'カーポート2台用', fixed: { low: 400000, high: 550000 } },
@@ -107,11 +135,11 @@ const WORK_OPTIONS = [
   { id: 'concrete', label: '土間コンクリート', note: '駐車場・アプローチなどのコンクリート舗装' },
   { id: 'gravel', label: '砕石敷き', note: '砕石のみの敷き込み' },
   { id: 'weed_gravel', label: '防草シート＋砕石敷き', note: '防草シート込みの砕石施工' },
-  { id: 'turf', label: '人工芝', note: '人工芝の敷設' },
+  { id: 'turf', label: '人工芝', note: '下地づくり・防草対策を含む一般的な人工芝施工' },
   { id: 'fence_mesh', label: 'メッシュフェンス', note: '設置方法と長さから概算' },
   { id: 'privacy_fence', label: '目隠しフェンス', note: '板塀・ルーバー系の目隠しフェンス' },
   { id: 'block_add', label: 'ブロック1段追加', note: '既存ブロック上への1段追加' },
-  { id: 'block_new', label: 'ブロック新設（ベースから）', note: 'ベースから新設するブロック工事' },
+  { id: 'block_new', label: 'ブロック新設（ベースから）', note: '種類・高さ・長さで概算' },
   { id: 'carport', label: 'カーポート', note: '1台用・2台用・3台用相談' },
   { id: 'concrete_break', label: 'コンクリート解体', note: '既存土間や犬走りなどの解体' },
   { id: 'block_break_top', label: 'ブロック解体（上だけ）', note: '上積み部分のみ解体' },
