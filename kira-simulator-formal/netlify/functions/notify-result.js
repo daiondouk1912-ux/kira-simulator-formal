@@ -95,6 +95,27 @@ function meshFenceInputText(val = {}) {
   return `メッシュフェンス: 長さ=${length}m / 高さ=${height} / 設置方法=${method}`;
 }
 
+const BLOCK_NEW_KINDS = {
+  standard: '標準ブロック',
+  decorative: '化粧ブロック',
+};
+
+const BLOCK_NEW_HEIGHTS = {
+  h200: '1段・H200程度',
+  h400: '2段・H400程度',
+  h600: '3段・H600程度',
+  h800: '4段・H800程度',
+  h1000: '5段・H1000程度',
+  h1200: '6段・H1200程度',
+};
+
+function blockNewInputText(val = {}) {
+  const kind = BLOCK_NEW_KINDS[val.kind] || '種類未選択';
+  const height = BLOCK_NEW_HEIGHTS[val.height] || '高さ未選択';
+  const length = safeShort(val.quantity || '-');
+  return `ブロック新設: 種類=${kind} / 高さ=${height} / 長さ=${length}m`;
+}
+
 
 function yen(value) {
   return new Intl.NumberFormat('ja-JP', { style: 'currency', currency: 'JPY', maximumFractionDigits: 0 }).format(safeNumber(value));
@@ -157,6 +178,8 @@ function inputValuesText(selected = [], inputs = {}) {
       parts.push(meshFenceInputText(val));
     } else if (key === 'privacy_fence') {
       parts.push(privacyFenceInputText(val));
+    } else if (key === 'block_new') {
+      parts.push(blockNewInputText(val));
     } else if (key === 'carport') {
       parts.push(`カーポート: ${safeShort(val.size)}台用`);
     } else if (key === 'custom_consult') {
