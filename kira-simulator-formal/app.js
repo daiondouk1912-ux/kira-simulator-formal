@@ -1,4 +1,4 @@
-// v14.0: フェンス条件分岐・価格調整（LIXILフェンスAB基準） + v13.9セキュリティ強化後の安定版
+// v14.3: カーポート3台用の概算反映・表示改善 + v14.2フェンス条件分岐
 // 計算に使う公開用レンジは publicPriceMaster.js から読み込みます。
 // 原価・人工原価・利益率などの内部情報は、このお客さま用アプリには入れません。
 const {
@@ -71,8 +71,36 @@ const app = document.getElementById('app');
 const STEP_LABELS = ['スタート', '工事を選ぶ', '内容を入力', '内容を確認', '概算を見る'];
 const LINE_TALK_URL = 'https://line.me/R/oaMessage/%40963rsnpu';
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
-const APP_VERSION = 'v14.2-mesh-fence-height-price';
+const APP_VERSION = 'v14.3-carport3-price-fix';
 const GA_MEASUREMENT_ID = (window.KIRA_GA_MEASUREMENT_ID || '').trim();
+
+const CARPORT_SIZE_RANGES = {
+  '3': {
+    label: 'カーポート3台用',
+    low: 700000,
+    high: 1600000,
+    inputText: '3台用',
+    note: '3台用カーポートは、商品・柱位置・奥行・間口・屋根材・積雪/風の仕様により金額が大きく変わります。現地確認後に正式金額をご案内します。',
+  },
+};
+
+function calcCarport(size) {
+  if (size === '1') return { ...calcFromMaster('carport1', 1), label: 'カーポート1台用', inputText: '1台用' };
+  if (size === '2') return { ...calcFromMaster('carport2', 1), label: 'カーポート2台用', inputText: '2台用' };
+  const range = CARPORT_SIZE_RANGES[size];
+  if (!range) return null;
+  return {
+    label: range.label,
+    low: range.low,
+    high: range.high,
+    quantity: null,
+    unit: null,
+    rule: 'band',
+    inputText: range.inputText,
+    note: range.note,
+  };
+}
+
 
 const PRIVACY_FENCE_HEIGHTS = {
   h1000: { label: 'H800〜H1000程度' },
@@ -606,10 +634,9 @@ function computeResults() {
       if (result) items.push(result);
     }
     if (key === 'carport') {
-      const size = state.inputs.carport.size;
-      if (size === '1') items.push({ ...calcFromMaster('carport1', 1), label: 'カーポート1台用', inputText: '1台用' });
-      else if (size === '2') items.push({ ...calcFromMaster('carport2', 1), label: 'カーポート2台用', inputText: '2台用' });
-      else consult.push('カーポート3台用');
+      const result = calcCarport(state.inputs.carport.size);
+      if (result) items.push(result);
+      else consult.push('カーポート');
     }
     if (['tile_deck','approach','stone_approach'].includes(key)) {
       const result = v12AreaBandResult(key, getQuantityValue(key));
@@ -1151,10 +1178,11 @@ function renderStep2() {
             <select data-key="carport" data-name="size">
               <option value="1" ${state.inputs.carport.size === '1' ? 'selected' : ''}>1台用</option>
               <option value="2" ${state.inputs.carport.size === '2' ? 'selected' : ''}>2台用</option>
-              <option value="3" ${state.inputs.carport.size === '3' ? 'selected' : ''}>3台用（相談）</option>
+              <option value="3" ${state.inputs.carport.size === '3' ? 'selected' : ''}>3台用（概算幅広め）</option>
             </select>
           </div>
         </div>
+        <p class="field-help">3台用は商品仕様・柱位置・積雪/風の強さで金額差が大きいため、概算幅を広めにしています。</p>
       `));
     }
     if (['tile_deck','approach','stone_approach'].includes(key)) {
