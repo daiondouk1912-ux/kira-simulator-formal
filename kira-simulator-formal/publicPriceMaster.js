@@ -1,5 +1,5 @@
 // KirA 公開用 概算マスター
-// v14.4.1: 最近のKirA見積実績を反映（人工芝補正 + ブロック新設の種類・高さ・長さ分岐）
+// v15.0: 規模入力を明確化し、未算出項目がある場合の合計誤認を防止
 // 注意：このファイルには、お客さまに見えてよい概算レンジだけを入れます。
 // 原価・人工原価・利益率などの内部情報は絶対に入れないでください。
 (function () {
@@ -148,7 +148,7 @@ const WORK_OPTIONS = [
   { id: 'tile_deck', label: 'タイルデッキ', note: '小さめから広めまで面積で概算' },
   { id: 'approach', label: 'アプローチ・園路', note: '玄関まわりや庭の通路など' },
   { id: 'stone_approach', label: 'タイル・石貼り系アプローチ', note: 'タイル・乱形石・石貼りなど' },
-  { id: 'retaining_wall', label: '土留め・高低差調整', note: '低めのブロック土留め・型枠ブロックなど' },
+  { id: 'retaining_wall', label: '土留め・高低差調整', note: '種類・高さ・長さから概算。条件が重い場合は現地確認' },
   { id: 'edging', label: '見切り材・境界処理', note: '人工芝・砂利・植栽まわりの見切り' },
   { id: 'lighting', label: '照明・ライトアップ', note: '庭やアプローチの照明' },
   { id: 'drainage_adjust', label: '排水・桝まわり調整', note: '桝高さ調整や排水まわりの相談' },
@@ -189,15 +189,18 @@ const V12_LABELS = {
 };
 
 const RETAINING_TYPES = {
-  low_block: '低めのブロック土留め',
+  low_block: '標準ブロック土留め（楽目地・普通CB）',
   form_block: '型枠ブロック土留め',
-  cast_concrete: '現場打ちコンクリート土留め・擁壁',
-  unknown: 'よく分からないので相談したい',
+  cast_concrete: '現場打ちコンクリート擁壁',
+  unknown: '種類が分からない',
 };
 const RETAINING_HEIGHTS = {
-  low: { label: '低め', rate: 0.9 },
-  normal: { label: '普通', rate: 1 },
-  high: { label: '高め', rate: 1.3 },
+  h400: { label: 'H400程度', rate: 0.7 },
+  h600: { label: 'H600程度', rate: 0.8 },
+  h800: { label: 'H800程度', rate: 0.9 },
+  h1000: { label: 'H1000程度', rate: 1.0 },
+  h1200: { label: 'H1200程度', rate: 1.15 },
+  h1200plus: { label: 'H1200超', consultOnly: true },
 };
 const DRAINAGE_TYPES = {
   height: '桝高さ調整',

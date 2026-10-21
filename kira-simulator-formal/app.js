@@ -1,4 +1,4 @@
-// v14.4.1: 最近のKirA見積実績を反映（人工芝補正 + ブロック新設の種類・高さ・長さ分岐）
+// v15.0: 規模入力を明確化し、未算出項目がある場合の合計誤認を防止
 // 計算に使う公開用レンジは publicPriceMaster.js から読み込みます。
 // 原価・人工原価・利益率などの内部情報は、このお客さま用アプリには入れません。
 const {
@@ -58,7 +58,7 @@ const state = {
     tile_deck: makeQuantityInput(),
     approach: makeQuantityInput(),
     stone_approach: makeQuantityInput(),
-    retaining_wall: { type: 'low_block', length: '', height: 'normal' },
+    retaining_wall: { type: '', length: '', height: '' },
     edging: { length: '' },
     lighting: { count: '1' },
     drainage_adjust: { type: 'height' },
@@ -71,7 +71,7 @@ const app = document.getElementById('app');
 const STEP_LABELS = ['スタート', '工事を選ぶ', '内容を入力', '内容を確認', '概算を見る'];
 const LINE_TALK_URL = 'https://line.me/R/oaMessage/%40963rsnpu';
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
-const APP_VERSION = 'v14.4.1-recent-estimate-block-kind-height';
+const APP_VERSION = 'v15.0-scale-guard';
 const GA_MEASUREMENT_ID = (window.KIRA_GA_MEASUREMENT_ID || '').trim();
 
 const CARPORT_SIZE_RANGES = {
@@ -641,15 +641,36 @@ function calcGatePost(input = {}) {
   return { label: `${V12_LABELS.gate_post}（${GATE_POST_TYPES[type] || GATE_POST_TYPES.simple}）`, low: range.low, high: range.high, quantity: null, unit: null, rule: 'band', inputText: GATE_POST_TYPES[type] || GATE_POST_TYPES.simple, note: '商品・仕上げ・配線により金額が変わります。' };
 }
 
+function retainingWallInputText(input = {}) {
+  const typeLabel = RETAINING_TYPES[input.type] || '種類未選択';
+  const heightRule = RETAINING_HEIGHTS[input.height];
+  const heightLabel = heightRule?.label || '高さ未選択';
+  return `${typeLabel} / 長さ：${input.length || '-'}m / 高さ：${heightLabel}`;
+}
+
 function calcRetainingWall(input = {}) {
-  const type = input.type || 'low_block';
-  if (type === 'unknown') return null;
-  if (type === 'cast_concrete') {
-    return { label: RETAINING_TYPES.cast_concrete, low: 300000, high: 500000, quantity: null, unit: null, rule: 'consult', inputText: '現場打ちコンクリート土留め・擁壁', note: '現地確認後にご案内します。' };
-  }
+  const type = input.type || '';
   const q = Number(input.length || 0);
-  if (!q || q <= 0) return null;
-  const h = RETAINING_HEIGHTS[input.height || 'normal'] || RETAINING_HEIGHTS.normal;
+  const h = RETAINING_HEIGHTS[input.height];
+  if (!type || !q || q <= 0 || !h) return null;
+
+  const label = `${V12_LABELS.retaining_wall}（${RETAINING_TYPES[type] || '種類未選択'}）`;
+  const inputText = retainingWallInputText(input);
+
+  // 現場打ち擁壁・種類不明・H1200超は、規模は記録するが公開概算の合計には入れない。
+  if (type === 'unknown' || type === 'cast_concrete' || h.consultOnly) {
+    return {
+      label,
+      unpriced: true,
+      inputText,
+      reason: type === 'cast_concrete'
+        ? '構造・配筋・基礎条件の影響が大きいため、現地確認後に算出します。'
+        : h.consultOnly
+          ? 'H1200を超える土留めは構造条件の確認が必要なため、現地確認後に算出します。'
+          : '種類が未確定のため、現地確認後に算出します。',
+    };
+  }
+
   let low, high, rule = 'unit';
   if (type === 'form_block') {
     if (q <= 2) { low = 120000; high = 220000; rule = 'small_adjust'; }
@@ -660,71 +681,104 @@ function calcRetainingWall(input = {}) {
   }
   low = Math.round(low * h.rate);
   high = Math.round(high * h.rate);
-  return { label: `${V12_LABELS.retaining_wall}（${RETAINING_TYPES[type]}）`, low, high, quantity: q, unit: 'm', rule, inputText: `${RETAINING_TYPES[type]} / 長さ：${input.length || '-'}m / 高さ：${h.label}`, note: '高さや掘削状況により金額が変わります。' };
+  return {
+    label,
+    low,
+    high,
+    quantity: q,
+    unit: 'm',
+    rule,
+    inputText,
+    note: '土圧・根入れ・配筋・掘削・搬入条件により金額が変わります。',
+  };
 }
 
 function computeResults() {
   const items = [];
+  const unpriced = [];
   const consult = [];
 
   for (const key of state.selected) {
     if (key === 'privacy_fence') {
       const result = calcPrivacyFence(state.inputs.privacy_fence);
       if (result) items.push(result);
+      else unpriced.push({ label: '目隠しフェンス', inputText: privacyFenceInputText(state.inputs.privacy_fence), reason: '入力条件を確認してください。' });
       continue;
     }
     if (key === 'block_new') {
       const result = calcBlockNew(state.inputs.block_new);
       if (result) items.push(result);
+      else unpriced.push({ label: 'ブロック新設（ベースから）', inputText: blockNewInputText(state.inputs.block_new), reason: '入力条件を確認してください。' });
       continue;
     }
     if (QUANTITY_KEYS.includes(key)) {
       const result = calcFromMaster(key, getQuantityValue(key));
       if (result) items.push(result);
+      else {
+        const meta = PRICE_MASTER[key];
+        unpriced.push({ label: meta?.label || key, inputText: quantityInputLabel(key), reason: '数量を確認してください。' });
+      }
+      continue;
     }
     if (key === 'fence_mesh') {
       const result = calcMeshFence(state.inputs.fence_mesh);
       if (result) items.push(result);
+      else unpriced.push({ label: 'メッシュフェンス', inputText: meshFenceInputText(state.inputs.fence_mesh), reason: '入力条件を確認してください。' });
+      continue;
     }
     if (key === 'carport') {
       const result = calcCarport(state.inputs.carport.size);
       if (result) items.push(result);
-      else consult.push('カーポート');
+      else unpriced.push({ label: 'カーポート', inputText: `${state.inputs.carport.size || '-'}台用`, reason: '仕様確認が必要です。' });
+      continue;
     }
     if (['tile_deck','approach','stone_approach'].includes(key)) {
       const result = v12AreaBandResult(key, getQuantityValue(key));
       if (result) items.push(result);
+      else unpriced.push({ label: V12_LABELS[key], inputText: quantityInputLabel(key), reason: '面積を確認してください。' });
+      continue;
     }
     if (key === 'retaining_wall') {
       const result = calcRetainingWall(state.inputs.retaining_wall);
-      if (result) items.push(result);
-      else consult.push('土留め・高低差調整');
+      if (result?.unpriced) unpriced.push(result);
+      else if (result) items.push(result);
+      else unpriced.push({ label: '土留め・高低差調整', inputText: retainingWallInputText(state.inputs.retaining_wall), reason: '種類・高さ・長さを確認してください。' });
+      continue;
     }
     if (key === 'edging') {
       const result = calcEdging(state.inputs.edging);
       if (result) items.push(result);
+      else unpriced.push({ label: V12_LABELS.edging, inputText: `長さ：${state.inputs.edging.length || '-'}m`, reason: '長さを確認してください。' });
+      continue;
     }
     if (key === 'lighting') {
       const result = calcLighting(state.inputs.lighting);
       if (result) items.push(result);
+      else unpriced.push({ label: V12_LABELS.lighting, inputText: `${state.inputs.lighting.count || '-'}箇所`, reason: '箇所数を確認してください。' });
+      continue;
     }
     if (key === 'drainage_adjust') {
       const result = calcDrainage(state.inputs.drainage_adjust);
       if (result) items.push(result);
+      continue;
     }
     if (key === 'gate_post') {
       const result = calcGatePost(state.inputs.gate_post);
       if (result) items.push(result);
+      continue;
     }
     if (key === 'custom_consult') {
-      consult.push(state.inputs.custom_consult.note?.trim() || '一覧にない工事の相談');
+      const text = state.inputs.custom_consult.note?.trim() || '一覧にない工事の相談';
+      consult.push(text);
+      unpriced.push({ label: 'その他の工事・気になる内容', inputText: text, reason: '内容確認後に算出します。' });
     }
   }
 
   const totalLow = items.reduce((sum, item) => sum + item.low, 0);
   const totalHigh = items.reduce((sum, item) => sum + item.high, 0);
+  const allPriced = unpriced.length === 0;
 
-  return { items, consult, totalLow, totalHigh };
+  return { items, unpriced, consult, totalLow, totalHigh, allPriced };
 }
 
 function createStep(index, title) {
@@ -827,9 +881,7 @@ function currentInputSummary() {
     } else if (['tile_deck','approach','stone_approach'].includes(key)) {
       parts.push(`${V12_LABELS[key]}: ${quantityInputLabel(key)}`);
     } else if (key === 'retaining_wall') {
-      const v = state.inputs.retaining_wall;
-      const h = RETAINING_HEIGHTS[v.height || 'normal']?.label || '-';
-      parts.push(`土留め: ${RETAINING_TYPES[v.type] || '-'} / 長さ${v.length || '-'}m / 高さ${h}`);
+      parts.push(`土留め: ${retainingWallInputText(state.inputs.retaining_wall)}`);
     } else if (key === 'edging') {
       parts.push(`見切り材: 長さ${state.inputs.edging.length || '-'}m`);
     } else if (key === 'lighting') {
@@ -928,11 +980,17 @@ function buildLineSaveText() {
   ensureSession();
   const selected = selectedLabels();
   const inputSummary = currentInputSummary();
+  const pricedLines = results.items.map((item) => `${item.label}: ${formatRange(item.low, item.high)}`);
+  const unpricedLines = results.unpriced.map((item) => `${item.label}: 現地確認後に算出（${item.inputText || item.reason || ''}）`);
+  const totalText = results.allPriced && results.items.length
+    ? formatRange(results.totalLow, results.totalHigh)
+    : '未表示（未算出項目あり）';
+
   const text = [
     '【KirA 概算シミュレーター結果】',
     `受付番号：${state.receiptNo}`,
     `エリア：${getProjectArea()}`,
-    `概算：${results.items.length ? formatRange(results.totalLow, results.totalHigh) : '-'}`,
+    `合計概算：${totalText}`,
     '',
     '項目：',
     compactLines(selected, 10),
@@ -940,7 +998,12 @@ function buildLineSaveText() {
     '入力内容：',
     compactLines(inputSummary, 10),
     '',
-    '※ 表示金額は概算の目安です。正式なお見積もりは現地確認後にご案内します。',
+    '概算内訳：',
+    compactLines([...pricedLines, ...unpricedLines], 12),
+    '',
+    results.allPriced
+      ? '※ 表示金額は概算の目安です。正式なお見積もりは現地確認後にご案内します。'
+      : '※ 未算出項目があるため合計金額は表示していません。現地確認後に全体金額をご案内します。',
     '※ LINEに送信しておくと、あとから見返しやすくなります。',
   ].join('\n');
   return limitPlainText(text, 1800);
@@ -1000,7 +1063,9 @@ function validateSelectedInputs() {
     if (key === 'fence_mesh' && !hasPositive(state.inputs.fence_mesh.length)) messages.push('メッシュフェンス：長さを入力してください。');
     if (key === 'retaining_wall') {
       const v = state.inputs.retaining_wall;
-      if (['low_block', 'form_block'].includes(v.type) && !hasPositive(v.length)) messages.push('土留め・高低差調整：長さを入力してください。');
+      if (!v.type || !RETAINING_TYPES[v.type]) messages.push('土留め・高低差調整：種類を選択してください。');
+      if (!v.height || !RETAINING_HEIGHTS[v.height]) messages.push('土留め・高低差調整：高さを選択してください。');
+      if (!hasPositive(v.length)) messages.push('土留め・高低差調整：長さを入力してください。');
     }
     if (key === 'edging' && !hasPositive(state.inputs.edging.length)) messages.push('見切り材・境界処理：長さを入力してください。');
     if (key === 'custom_consult' && !String(state.inputs.custom_consult.note || '').trim()) messages.push('その他の工事・気になる内容：内容を入力してください。');
@@ -1282,25 +1347,28 @@ function renderStep2() {
     }
     if (key === 'retaining_wall') {
       const v = state.inputs.retaining_wall;
-      blocks.push(fieldBlock('土留め・高低差調整', '土留めの種類と長さを選んでください。分からない場合は相談扱いでも進められます。', `
+      blocks.push(fieldBlock('土留め・高低差調整', '種類・高さ・長さを入力してください。規模が分からないまま金額は表示しません。', `
         <div class="field-row">
           <div class="field">
             <label>種類</label>
             <select data-key="retaining_wall" data-name="type">
+              <option value="">選択してください</option>
               ${Object.entries(RETAINING_TYPES).map(([value, label]) => `<option value="${value}" ${v.type === value ? 'selected' : ''}>${label}</option>`).join('')}
             </select>
           </div>
           <div class="field">
-            <label>長さ（m）</label>
-            <input type="number" min="0" step="0.1" data-key="retaining_wall" data-name="length" value="${v.length}" placeholder="例）5" />
-          </div>
-          <div class="field">
             <label>高さの目安</label>
             <select data-key="retaining_wall" data-name="height">
+              <option value="">選択してください</option>
               ${Object.entries(RETAINING_HEIGHTS).map(([value, item]) => `<option value="${value}" ${v.height === value ? 'selected' : ''}>${item.label}</option>`).join('')}
             </select>
           </div>
+          <div class="field">
+            <label>長さ（m）</label>
+            <input type="number" min="0" step="0.1" data-key="retaining_wall" data-name="length" value="${v.length}" placeholder="例）10" />
+          </div>
         </div>
+        <p class="field-help">H1200超・現場打ち擁壁・種類が分からない場合は、長さと高さの規模だけ記録し、合計金額には含めず「現地確認後に算出」と表示します。</p>
       `));
     }
     if (key === 'edging') {
@@ -1399,8 +1467,8 @@ function renderStep3() {
     }
     if (key === 'retaining_wall') {
       const v = state.inputs.retaining_wall;
-      const h = RETAINING_HEIGHTS[v.height || 'normal']?.label || '-';
-      return `<div class="summary-item"><h4>土留め・高低差調整</h4><div>種類：${RETAINING_TYPES[v.type] || '-'}</div><div>長さ：${v.length || '-'}m</div><div>高さ：${h}</div></div>`;
+      const h = RETAINING_HEIGHTS[v.height]?.label || '未選択';
+      return `<div class="summary-item"><h4>土留め・高低差調整</h4><div>種類：${RETAINING_TYPES[v.type] || '未選択'}</div><div>高さ：${h}</div><div>長さ：${v.length || '-'}m</div></div>`;
     }
     if (key === 'edging') return `<div class="summary-item"><h4>見切り材・境界処理</h4><div>長さ：${state.inputs.edging.length || '-'}m</div></div>`;
     if (key === 'lighting') return `<div class="summary-item"><h4>照明・ライトアップ</h4><div>箇所数：${state.inputs.lighting.count || '-'}箇所</div></div>`;
@@ -1460,6 +1528,20 @@ function renderStep4() {
   const consultHtml = results.consult.length
     ? `<div style="margin-top:16px"><h3>ご相談内容</h3>${results.consult.map((c) => `<span class="tag">${sanitizeText(c)}</span>`).join('')}</div>`
     : '';
+  const unpricedHtml = results.unpriced.length
+    ? `<div class="result-list" style="margin-top:16px">
+        ${results.unpriced.map((item) => `
+          <div class="result-item">
+            <h4>${sanitizeText(item.label || '未算出項目')}</h4>
+            <div class="price">現地確認後に算出</div>
+            <div class="detail">
+              ${item.inputText ? `入力内容：${sanitizeText(item.inputText)}` : ''}
+              ${item.reason ? `<br>※ ${sanitizeText(item.reason)}` : ''}
+            </div>
+          </div>
+        `).join('')}
+      </div>`
+    : '';
 
   setBody(step, `
     ${progressPills(4)}
@@ -1483,11 +1565,22 @@ function renderStep4() {
         </div>
       `).join('') : '<div class="result-item"><h4>概算対象がありません</h4><div class="detail">選択内容を見直してください。</div></div>'}
     </div>
+    ${unpricedHtml}
 
     <div class="result-total">
-      <div class="muted">合計の概算目安</div>
-      <div class="price">${results.items.length ? formatRange(results.totalLow, results.totalHigh) : '-'}</div>
-      <p class="small estimate-note">※ 表示金額は概算の目安です。正式なお見積もりは現地確認後にご案内します。</p>
+      <div class="muted">${results.allPriced ? '合計の概算目安' : '全体の概算について'}</div>
+      <div class="price">${
+        results.allPriced && results.items.length
+          ? formatRange(results.totalLow, results.totalHigh)
+          : results.items.length
+            ? '合計は表示していません'
+            : '現地確認後にご案内'
+      }</div>
+      ${
+        !results.allPriced && results.items.length
+          ? `<p class="small estimate-note"><strong>算出できた項目だけの小計：</strong>${formatRange(results.totalLow, results.totalHigh)}<br>※ 未算出項目があるため、この金額は工事全体の合計ではありません。</p>`
+          : `<p class="small estimate-note">※ 表示金額は概算の目安です。正式なお見積もりは現地確認後にご案内します。</p>`
+      }
     </div>
 
     <div class="benefit-note compact-benefit">
