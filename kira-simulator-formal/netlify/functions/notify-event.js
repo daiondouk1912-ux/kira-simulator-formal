@@ -174,8 +174,14 @@ exports.handler = async (event) => {
   const receiptNo = normalizeReceiptNo(body.receiptNo);
   const projectArea = normalizeProjectArea(body.projectArea);
   const selected = Array.isArray(body.selected) ? body.selected.map((v) => safeShort(v, '', 40)).filter(Boolean).slice(0, 30) : [];
+  const selectedLabels = Array.isArray(body.selectedLabels)
+    ? body.selectedLabels.map((v) => stripDangerousText(v, 80)).filter(Boolean).slice(0, 30)
+    : [];
+  const inputSummary = Array.isArray(body.inputSummary)
+    ? body.inputSummary.map((v) => stripDangerousText(v, 220)).filter(Boolean).slice(0, 30)
+    : [];
   const inputCount = safeInteger(body.inputCount || body.inputItemCount || body.enteredCount, { max: 80, fallback: 0 });
-  const durationSec = safeInteger(body.durationSec || body.staySeconds || body.elapsedSeconds, { max: 21600, fallback: 0 });
+  const durationSec = safeInteger(body.durationSec || body.staySeconds || body.elapsedSeconds || Math.round(Number(body.elapsedMs || 0) / 1000), { max: 21600, fallback: 0 });
   const estimatedPrice = stripDangerousText(body.estimatedPrice || body.priceText || body.totalText || '', 80);
   const textInput = feedbackText(body);
   const safeFeedback = stripDangerousText(textInput, 500);
@@ -193,12 +199,16 @@ exports.handler = async (event) => {
   }
 
   const extra = sanitizeDeep(body.extra || body.details || body.payload || {});
+  const displayItems = selectedLabels.length ? selectedLabels : selected;
+  const showConditions = eventInfo.label !== '工事項目選択' && inputSummary.length > 0;
+
   const lines = [
     '概算シミュレーター行動通知',
     `・種別: ${eventInfo.label}`,
     `・受付番号: ${receiptNo}`,
     `・エリア: ${projectArea}`,
-    selected.length ? `・項目: ${selected.join('、')}` : null,
+    displayItems.length ? `・項目: ${displayItems.join('、')}` : null,
+    showConditions ? `・条件: ${inputSummary.join(' / ')}` : null,
     estimatedPrice ? `・概算: ${estimatedPrice}` : null,
     inputCount ? `・入力項目数: ${inputCount}` : null,
     durationSec ? `・滞在時間: ${durationSec}秒` : null,

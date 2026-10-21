@@ -109,6 +109,29 @@ const BLOCK_NEW_HEIGHTS = {
   h1200: '6段・H1200程度',
 };
 
+const RETAINING_TYPES = {
+  low_block: '標準ブロック土留め（楽目地・普通CB）',
+  form_block: '型枠ブロック土留め',
+  cast_concrete: '現場打ちコンクリート擁壁',
+  unknown: '種類が分からない',
+};
+
+const RETAINING_HEIGHTS = {
+  h400: 'H400程度',
+  h600: 'H600程度',
+  h800: 'H800程度',
+  h1000: 'H1000程度',
+  h1200: 'H1200程度',
+  h1200plus: 'H1200超',
+};
+
+function retainingWallInputText(val = {}) {
+  const type = RETAINING_TYPES[val.type] || '種類未選択';
+  const height = RETAINING_HEIGHTS[val.height] || '高さ未選択';
+  const length = safeShort(val.length || '-');
+  return `土留め: 種類=${type} / 高さ=${height} / 長さ=${length}m`;
+}
+
 function blockNewInputText(val = {}) {
   const kind = BLOCK_NEW_KINDS[val.kind] || '種類未選択';
   const height = BLOCK_NEW_HEIGHTS[val.height] || '高さ未選択';
@@ -141,6 +164,12 @@ function sanitizeResults(results = {}) {
     unit: safeShort(item.unit || '', '', 10),
     inputText: safeShort(item.inputText || '', '', 180),
   }));
+  const rawUnpriced = Array.isArray(results.unpriced) ? results.unpriced : [];
+  const unpriced = rawUnpriced.slice(0, 20).map((item) => ({
+    label: safeShort(item.label || item.name || '未算出項目', '未算出項目', 80),
+    inputText: safeShort(item.inputText || '', '', 180),
+    reason: safeShort(item.reason || '現地確認後に算出します。', '現地確認後に算出します。', 180),
+  }));
   const consult = (Array.isArray(results.consult) ? results.consult : [])
     .slice(0, 10)
     .map((v) => stripDangerousText(v, 180))
@@ -149,16 +178,22 @@ function sanitizeResults(results = {}) {
   const itemHigh = items.reduce((sum, item) => sum + item.high, 0);
   const totalLow = safeNumber(results.totalLow, { max: 99999999, fallback: itemLow });
   const totalHigh = safeNumber(results.totalHigh, { max: 99999999, fallback: itemHigh });
-  return { items, consult, totalLow, totalHigh };
+  const allPriced = typeof results.allPriced === 'boolean'
+    ? results.allPriced && unpriced.length === 0
+    : unpriced.length === 0 && consult.length === 0;
+  return { items, unpriced, consult, totalLow, totalHigh, allPriced };
 }
 
 function selectedItemsText(selected = [], results = {}) {
   const itemLabels = (results.items || []).map((item) => item.label);
+  const unpricedLabels = (results.unpriced || []).map((item) => item.label);
   const consult = (results.consult || []).filter(Boolean);
   const fallback = (Array.isArray(selected) ? selected : [])
     .slice(0, 30)
     .map((key) => LABELS[key] || safeShort(key, '', 40));
-  const all = (itemLabels.length || consult.length ? [...itemLabels, ...consult] : fallback).filter(Boolean);
+  const all = (itemLabels.length || unpricedLabels.length || consult.length
+    ? [...itemLabels, ...unpricedLabels, ...consult]
+    : fallback).filter(Boolean);
   return all.length ? Array.from(new Set(all)).join('、').slice(0, 900) : 'なし';
 }
 
@@ -182,6 +217,18 @@ function inputValuesText(selected = [], inputs = {}) {
       parts.push(blockNewInputText(val));
     } else if (key === 'carport') {
       parts.push(`カーポート: ${safeShort(val.size)}台用`);
+    } else if (key === 'retaining_wall') {
+      parts.push(retainingWallInputText(val));
+    } else if (key === 'edging') {
+      parts.push(`見切り材: 長さ=${safeShort(val.length || '-')}m`);
+    } else if (key === 'lighting') {
+      parts.push(`照明: ${safeShort(val.count || '-')}箇所`);
+    } else if (key === 'drainage_adjust') {
+      const typeMap = { height: '桝高さ調整', cutdown: '桝切り下げ・周辺調整', route: '排水経路・配管調整あり' };
+      parts.push(`排水・桝: ${typeMap[val.type] || '-'}`);
+    } else if (key === 'gate_post') {
+      const typeMap = { simple: 'シンプル機能門柱', custom: '造作門柱', delivery: '宅配ボックス・照明あり', full: '門まわり一式' };
+      parts.push(`門柱: ${typeMap[val.type] || '-'}`);
     } else if (key === 'custom_consult') {
       parts.push(`相談=${stripDangerousText(val.note || '-', 180)}`);
     } else if (typeof val.quantity !== 'undefined') {
@@ -190,6 +237,19 @@ function inputValuesText(selected = [], inputs = {}) {
     }
   }
   return parts.length ? parts.join(' / ').slice(0, 1600) : 'なし';
+}
+
+
+function resultBreakdownText(results = {}) {
+  const parts = [];
+  for (const item of (results.items || []).slice(0, 12)) {
+    parts.push(`${item.label} ${yen(item.low)}〜${yen(item.high)}`);
+  }
+  for (const item of (results.unpriced || []).slice(0, 12)) {
+    const condition = item.inputText ? `（${item.inputText}）` : '';
+    parts.push(`${item.label} 現地確認後に算出${condition}`);
+  }
+  return parts.length ? parts.join(' / ').slice(0, 1800) : 'なし';
 }
 
 exports.handler = async (event) => {
@@ -207,13 +267,15 @@ exports.handler = async (event) => {
   const results = sanitizeResults(body.results || {});
   const time = jstTime(body.displayedAt || new Date().toISOString());
   const inputCount = safeInteger(body.inputCount || body.inputItemCount || body.enteredCount, { max: 80, fallback: 0 });
-  const durationSec = safeInteger(body.durationSec || body.staySeconds || body.elapsedSeconds, { max: 21600, fallback: 0 });
+  const durationSec = safeInteger(body.durationSec || body.staySeconds || body.elapsedSeconds || Math.round(safeNumber(body.elapsedMs, { max: 21600000, fallback: 0 }) / 1000), { max: 21600, fallback: 0 });
 
-  if (!selected.length && results.items.length === 0 && results.consult.length === 0) {
+  if (!selected.length && results.items.length === 0 && results.unpriced.length === 0 && results.consult.length === 0) {
     return safeError(400, 'empty_result');
   }
 
-  const estimatedPrice = `${yen(results.totalLow)}〜${yen(results.totalHigh)}`;
+  const estimatedPrice = results.allPriced && results.items.length
+    ? `${yen(results.totalLow)}〜${yen(results.totalHigh)}`
+    : '未表示（未算出項目あり）';
   const duplicateKey = `result:${receiptNo}:${estimatedPrice}:${selected.join(',')}`;
   if (dedupe(duplicateKey, 15000)) {
     return jsonResponse(200, { ok: true, deduped: true });
@@ -225,7 +287,11 @@ exports.handler = async (event) => {
     `・エリア: ${projectArea}`,
     `・項目: ${selectedItemsText(selected, results)}`,
     `・条件: ${inputValuesText(selected, inputs)}`,
-    `・概算: ${estimatedPrice}`,
+    `・内訳: ${resultBreakdownText(results)}`,
+    `・全体概算: ${estimatedPrice}`,
+    (!results.allPriced && results.items.length)
+      ? `・算出済み項目の小計: ${yen(results.totalLow)}〜${yen(results.totalHigh)} ※全体合計ではありません`
+      : null,
     inputCount ? `・入力項目数: ${inputCount}` : null,
     durationSec ? `・滞在時間: ${durationSec}秒` : null,
     `・時間: ${time}`,
